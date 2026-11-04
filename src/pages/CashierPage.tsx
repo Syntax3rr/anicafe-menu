@@ -18,11 +18,10 @@ import {
 } from "@mantine/core";
 import { useForm } from "@mantine/form";
 import { modals } from "@mantine/modals";
-import { notifications } from "@mantine/notifications";
 import { OrderCard } from "../components/OrderCard";
 import { db } from "../firebase";
 import { MenuCategory, MenuItem, Order, OrderCategory } from "../types";
-import { formatPrice, SPECIALTY_CATEGORY, toFormKey, ZONES } from "../utils";
+import { formatPrice, notifyError, SPECIALTY_CATEGORY, toFormKey, ZONES } from "../utils";
 import classes from "../App.module.css";
 
 const MENU_COLUMNS = 2;
@@ -152,13 +151,7 @@ export function CashierPage({ menu }: { menu: MenuCategory[] }) {
           form.reset();
         } catch (error) {
           // Keep the form filled in so the cashier can retry
-          console.error("Error submitting order:", error);
-          notifications.show({
-            color: "red",
-            title: `Order #${order.number} was NOT saved`,
-            message: "Check the connection and submit again.",
-            autoClose: false,
-          });
+          notifyError(`Order #${order.number} was NOT saved`, error);
         }
       },
     });

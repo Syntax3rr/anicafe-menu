@@ -17,6 +17,7 @@ import {
 import { modals } from "@mantine/modals";
 import { db } from "../firebase";
 import { MenuCategory, MenuItem, StockLevel } from "../types";
+import { notifyError } from "../utils";
 
 /** Flags are edited as a comma-separated string so typing commas works */
 interface EditableMenuItem extends Omit<MenuItem, "flags"> {
@@ -117,8 +118,7 @@ export function EditMenuPage({ menu }: { menu: MenuCategory[] }) {
       setEditedMenu(toEditable(savedMenu));
       modals.open({ title: "Menu Saved", children: <p>Menu successfully updated!</p> });
     } catch (error) {
-      console.error("Error saving menu:", error);
-      modals.open({ title: "Error", children: <p>Failed to save menu. Check console for details.</p> });
+      notifyError("Failed to save menu", error);
     } finally {
       setSaving(false);
     }

@@ -1,5 +1,6 @@
 import { Button, Group } from "@mantine/core";
 import { hideNotification, notifications } from "@mantine/notifications";
+import { notifyError } from "../utils";
 
 /** Toast with an Undo button that runs `undo` and then dismisses itself */
 export function showUndoNotification(id: string, message: string, undo: () => Promise<unknown>) {
@@ -11,8 +12,12 @@ export function showUndoNotification(id: string, message: string, undo: () => Pr
         <Button
           variant="outline"
           onClick={async () => {
-            await undo();
-            hideNotification(id);
+            try {
+              await undo();
+              hideNotification(id);
+            } catch (error) {
+              notifyError("Failed to undo", error);
+            }
           }}
         >
           Undo
