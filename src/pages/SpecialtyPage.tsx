@@ -5,7 +5,7 @@ import { OrderGrid } from "../components/OrderGrid";
 import { showUndoNotification } from "../components/undoNotification";
 import { db } from "../firebase";
 import { Specialty } from "../types";
-import { notifySnapshotError, SPECIALTY_CATEGORY } from "../utils";
+import { notifyError, notifySnapshotError, SPECIALTY_CATEGORY } from "../utils";
 
 /** Specialty station: handles the Specialty category separately from the kitchen */
 export function SpecialtyPage() {
@@ -34,10 +34,14 @@ export function SpecialtyPage() {
   };
 
   const completeSpecialtyOrder = async (specialty: Specialty) => {
-    await setDone(specialty, true);
-    showUndoNotification(specialty.id + "specialty", `Specialty order #${specialty.number} completed!`, () =>
-      setDone(specialty, false),
-    );
+    try {
+      await setDone(specialty, true);
+      showUndoNotification(specialty.id + "specialty", `Specialty order #${specialty.number} completed!`, () =>
+        setDone(specialty, false),
+      );
+    } catch (error) {
+      notifyError(`Failed to complete specialty order #${specialty.number}`, error);
+    }
   };
 
   return (
