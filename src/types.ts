@@ -40,6 +40,8 @@ export interface Specialty {
   number: number;
   notes: string;
   done: boolean;
+  /** Missing on specialty docs created before this field was added */
+  specialtyOnly?: boolean;
   timestamp: Timestamp;
   items: OrderItems;
 }

@@ -21,8 +21,8 @@ export const formatPrice = (value: number) => value.toLocaleString("en-US", { st
 export const byKey = <T>([a]: [string, T], [b]: [string, T]) => a.localeCompare(b);
 
 // Mantine form paths are dot-separated, so escape dots in menu names used as form keys
+// (form values are mapped back to names via the menu, so no decoder is needed)
 export const toFormKey = (name: string) => name.replace(/%/g, "%25").replace(/\./g, "%2E");
-export const fromFormKey = (key: string) => decodeURIComponent(key);
 
 export const notifySnapshotError = (what: string) => (error: FirestoreError) => {
   console.error(`Error loading ${what}:`, error);
