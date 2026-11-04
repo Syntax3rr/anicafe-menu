@@ -2,8 +2,9 @@ import { useEffect, useMemo, useState } from "react";
 import { collection, onSnapshot, orderBy, query } from "firebase/firestore";
 import { Stack, Table, Title } from "@mantine/core";
 import { db } from "../firebase";
+import { orderFromDoc } from "../fromFirestore";
 import { MenuCategory, Order, OrderItems } from "../types";
-import { byKey, formatPrice, notifySnapshotError } from "../utils";
+import { byKey, formatCents, notifySnapshotError } from "../utils";
 
 const LOG_CATEGORIES = ["Food", "Drinks", "Specialty"];
 
@@ -21,9 +22,9 @@ function computeAnalytics(orders: Order[], menu: MenuCategory[]): [string, strin
     menu.flatMap((category) => category.items.map((item) => [item.itemName, 0] as const)),
   );
   let totalItems = 0;
-  let totalRevenue = 0;
+  let totalRevenueCents = 0;
   for (const order of orders) {
-    totalRevenue += order.price;
+    totalRevenueCents += order.totalCents;
     for (const category of Object.values(order.categories)) {
       for (const [itemName, { quantity }] of Object.entries(category.items)) {
         totalItems += quantity;
@@ -34,7 +35,7 @@ function computeAnalytics(orders: Order[], menu: MenuCategory[]): [string, strin
   return [
     ["Total Orders", orders.length],
     ["Total Items", totalItems],
-    ["Total Revenue", formatPrice(totalRevenue)],
+    ["Total Revenue", formatCents(totalRevenueCents)],
     ...soldByItem,
   ];
 }
@@ -46,7 +47,7 @@ export function AllOrdersPage({ menu }: { menu: MenuCategory[] }) {
     () =>
       onSnapshot(
         query(collection(db, "orders"), orderBy("timestamp")),
-        (snapshot) => setOrders(snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }) as Order)),
+        (snapshot) => setOrders(snapshot.docs.map(orderFromDoc)),
         notifySnapshotError("orders"),
       ),
     [],
@@ -95,8 +96,8 @@ export function AllOrdersPage({ menu }: { menu: MenuCategory[] }) {
             <Table.Tr key={order.id}>
               <Table.Td>{order.number}</Table.Td>
               <Table.Td>{order.timestamp?.toDate().toLocaleTimeString("en-US")}</Table.Td>
-              <Table.Td>{formatPrice(order.price)}</Table.Td>
-              <Table.Td>{formatPrice(order.discount)}</Table.Td>
+              <Table.Td>{formatCents(order.totalCents)}</Table.Td>
+              <Table.Td>{formatCents(order.discountCents)}</Table.Td>
               <Table.Td>{order.completed ? "Yes" : "No"}</Table.Td>
               <Table.Td>{order.notes}</Table.Td>
               {LOG_CATEGORIES.map((categoryName) => (

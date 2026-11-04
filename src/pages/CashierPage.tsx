@@ -1,6 +1,8 @@
-import { Fragment, useRef, useState } from "react";
-import { collection, doc, serverTimestamp, writeBatch } from "firebase/firestore";
+import { Fragment, useEffect, useRef, useState } from "react";
+import { collection, doc, onSnapshot, query, serverTimestamp, where, writeBatch } from "firebase/firestore";
 import {
+  Alert,
+  Badge,
   Button,
   Card,
   Group,
@@ -17,11 +19,11 @@ import {
 } from "@mantine/core";
 import { useForm } from "@mantine/form";
 import { modals } from "@mantine/modals";
-import { notifications } from "@mantine/notifications";
 import { OrderCard } from "../components/OrderCard";
 import { db } from "../firebase";
-import { MenuCategory, Order, OrderCategory } from "../types";
-import { formatPrice, fromFormKey, SPECIALTY_CATEGORY, toFormKey, ZONES } from "../utils";
+import { orderFromDoc } from "../fromFirestore";
+import { MenuCategory, MenuItem, Order, OrderCategory } from "../types";
+import { formatCents, notifyError, notifySnapshotError, SPECIALTY_CATEGORY, toCents, toFormKey, ZONES } from "../utils";
 import classes from "../App.module.css";
 
 const MENU_COLUMNS = 2;
@@ -34,16 +36,14 @@ async function saveOrder(order: Order) {
   const specialty = order.categories[SPECIALTY_CATEGORY];
   const batch = writeBatch(db);
   const orderRef = doc(collection(db, "orders"));
-  batch.set(orderRef, {
-    ...order,
-    timestamp: serverTimestamp(),
-    specialtyOnly: specialty !== undefined && Object.keys(order.categories).length === 1,
-  });
+  const specialtyOnly = specialty !== undefined && Object.keys(order.categories).length === 1;
+  batch.set(orderRef, { ...order, timestamp: serverTimestamp(), specialtyOnly });
   if (specialty !== undefined) {
     batch.set(doc(db, "specialty", orderRef.id), {
       number: order.number,
       notes: order.notes,
       done: false,
+      specialtyOnly,
       timestamp: serverTimestamp(),
       items: specialty.items,
     });
@@ -52,92 +52,133 @@ async function saveOrder(order: Order) {
 }
 
 /** Converts form quantities to Order.categories, dropping zero quantities and empty categories */
-function toOrderCategories(quantities: Quantities): Order["categories"] {
+const emptyQuantities = (menu: MenuCategory[]): Quantities =>
+  Object.fromEntries(
+    menu.map((category) => [
+      toFormKey(category.categoryName),
+      Object.fromEntries(category.items.map((item) => [toFormKey(item.itemName), 0])),
+    ]),
+  );
+
+const quantityOf = (quantities: Quantities, category: MenuCategory, item: MenuItem) =>
+  quantities[toFormKey(category.categoryName)]?.[toFormKey(item.itemName)] ?? 0;
+
+// Both helpers walk the current menu rather than the form values, so items removed from
+// the menu mid-order (e.g. edited on another device) are dropped instead of priced as NaN
+
+const calculateTotalCents = (menu: MenuCategory[], quantities: Quantities) =>
+  menu.reduce(
+    (sum, category) =>
+      category.items.reduce((sum, item) => sum + item.priceCents * quantityOf(quantities, category, item), sum),
+    0,
+  );
+
+/** Converts form quantities to Order.categories, dropping zero quantities and empty categories */
+function toOrderCategories(menu: MenuCategory[], quantities: Quantities): Order["categories"] {
   const categories: Order["categories"] = {};
-  for (const [categoryKey, items] of Object.entries(quantities)) {
+  for (const menuCategory of menu) {
     const category: OrderCategory = { done: false, items: {} };
-    for (const [itemKey, quantity] of Object.entries(items)) {
-      if (quantity > 0) category.items[fromFormKey(itemKey)] = { quantity };
+    for (const item of menuCategory.items) {
+      const quantity = quantityOf(quantities, menuCategory, item);
+      if (quantity > 0) category.items[item.itemName] = { quantity };
     }
-    if (Object.keys(category.items).length > 0) categories[fromFormKey(categoryKey)] = category;
+    if (Object.keys(category.items).length > 0) categories[menuCategory.categoryName] = category;
   }
   return categories;
 }
 
+const DEFAULT_VALUES = {
+  number: null as number | null,
+  notes: "",
+  /** Dollars, as typed; converted with toCents */
+  discount: 0 as number | string,
+  zone: "Undecided",
+};
+
 export function CashierPage({ menu }: { menu: MenuCategory[] }) {
-  const [total, setTotal] = useState(0);
-  const handlersRef = useRef<(NumberInputHandlers | null | undefined)[][]>(
-    menu.map((category) => category.items.map(() => null)),
-  );
-
-  const priceOf: Quantities = Object.fromEntries(
-    menu.map((category) => [
-      toFormKey(category.categoryName),
-      Object.fromEntries(category.items.map((item) => [toFormKey(item.itemName), item.price])),
-    ]),
-  );
-
-  const calculateTotal = (quantities: Quantities) =>
-    Object.entries(quantities).reduce(
-      (sum, [categoryKey, items]) =>
-        Object.entries(items).reduce((sum, [itemKey, quantity]) => sum + priceOf[categoryKey][itemKey] * quantity, sum),
-      0,
-    );
+  const [totalCents, setTotalCents] = useState(0);
+  // Keyed by form path so the menu can change shape without breaking the lookups
+  const handlersRef = useRef<Record<string, NumberInputHandlers | null | undefined>>({});
 
   const form = useForm({
     mode: "uncontrolled",
-    initialValues: {
-      number: null as number | null,
-      notes: "",
-      discount: 0,
-      zone: "Undecided",
-      items: Object.fromEntries(
-        menu.map((category) => [
-          toFormKey(category.categoryName),
-          Object.fromEntries(category.items.map((item) => [toFormKey(item.itemName), 0])),
-        ]),
-      ) as Quantities,
-    },
-    onValuesChange: (values) => setTotal(calculateTotal(values.items) - values.discount),
+    initialValues: { ...DEFAULT_VALUES, items: emptyQuantities(menu) },
+    onValuesChange: (values) => setTotalCents(calculateTotalCents(menu, values.items) - toCents(values.discount)),
     validate: {
       number: (value: number | null) => (value && value > 0 ? null : "Order number is required"),
-      discount: () => (total >= 0 ? null : "Discount greater than order total"),
+      discount: () => (totalCents >= 0 ? null : "Discount greater than order total"),
     },
   });
+
+  // Keep the form in step with live menu edits: give new items a 0 quantity, make reset()
+  // use the current menu, and re-price the order in case prices changed
+  useEffect(() => {
+    const { items } = form.getValues();
+    for (const category of menu) {
+      const categoryKey = toFormKey(category.categoryName);
+      for (const item of category.items) {
+        const itemKey = toFormKey(item.itemName);
+        if (items[categoryKey]?.[itemKey] === undefined) form.setFieldValue(`items.${categoryKey}.${itemKey}`, 0);
+      }
+    }
+    form.setInitialValues({ ...DEFAULT_VALUES, items: emptyQuantities(menu) });
+    const values = form.getValues();
+    setTotalCents(calculateTotalCents(menu, values.items) - toCents(values.discount));
+    // Only re-run when the menu changes, not on every new `form` object
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [menu]);
+
+  // Order numbers are recycled, so only a still-open order with the same number is a duplicate.
+  // Kept live (rather than queried on submit) so the check is instant and works offline.
+  const [openOrders, setOpenOrders] = useState<Order[]>([]);
+  useEffect(
+    () =>
+      onSnapshot(
+        query(collection(db, "orders"), where("completed", "==", false)),
+        (snapshot) => setOpenOrders(snapshot.docs.map(orderFromDoc)),
+        notifySnapshotError("open orders"),
+      ),
+    [],
+  );
 
   const handleSubmit = (values: typeof form.values) => {
     const order: Order = {
       number: values.number ?? 0, // never 0 thanks to validation
-      price: total,
-      discount: values.discount,
+      totalCents,
+      discountCents: toCents(values.discount),
       notes: values.notes,
       completed: false,
       zone: values.zone,
-      categories: toOrderCategories(values.items),
+      categories: toOrderCategories(menu, values.items),
     };
+
+    const duplicate = openOrders.find((openOrder) => openOrder.number === order.number);
+    // The timestamp is null until the server has confirmed the write
+    const placedAt = duplicate?.timestamp?.toDate().toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
 
     modals.openConfirmModal({
       title: "Review Order",
       children: (
         <Stack>
+          {duplicate && (
+            <Alert color="orange" title={`Order #${order.number} is already open`}>
+              It was placed {placedAt ? `at ${placedAt}` : "just now"} and hasn't been completed. Only submit if you're
+              sure this number is free.
+            </Alert>
+          )}
           <Text size="sm">Please confirm that the order details are correct:</Text>
           <OrderCard order={order} />
         </Stack>
       ),
-      labels: { confirm: "Confirm", cancel: "Cancel" },
+      labels: { confirm: duplicate ? "Submit anyway" : "Confirm", cancel: "Cancel" },
+      confirmProps: duplicate && { color: "orange" },
       onConfirm: async () => {
         try {
           await saveOrder(order);
           form.reset();
         } catch (error) {
           // Keep the form filled in so the cashier can retry
-          console.error("Error submitting order:", error);
-          notifications.show({
-            color: "red",
-            title: `Order #${order.number} was NOT saved`,
-            message: "Check the connection and submit again.",
-            autoClose: false,
-          });
+          notifyError(`Order #${order.number} was NOT saved`, error);
         }
       },
     });
@@ -153,18 +194,39 @@ export function CashierPage({ menu }: { menu: MenuCategory[] }) {
             <Title order={4}>{category.categoryName}</Title>
           </Table.Td>
         </Table.Tr>
-        {category.items.map((item, j) => {
-          const itemKey = toFormKey(item.itemName);
-          const formPath = `items.${categoryKey}.${itemKey}`;
+        {category.items.map((item) => {
+          const formPath = `items.${categoryKey}.${toFormKey(item.itemName)}`;
+          const soldOut = item.stock === "none";
           return (
             <Table.Tr key={item.itemName} className={classes.flexRow}>
-              <Table.Td className={classes.flexGrow}>{item.itemName}</Table.Td>
-              <Table.Td className={classes.cashPriceContainer}>{formatPrice(item.price)}</Table.Td>
+              <Table.Td className={classes.flexGrow}>
+                <Group gap={6}>
+                  <Text span td={soldOut ? "line-through" : undefined} c={soldOut ? "dimmed" : undefined}>
+                    {item.itemName}
+                  </Text>
+                  {item.flags && item.flags.length > 0 && (
+                    <Text span size="xs" c="dimmed">
+                      {item.flags.join(", ")}
+                    </Text>
+                  )}
+                  {soldOut && (
+                    <Badge color="red" size="sm">
+                      Sold out
+                    </Badge>
+                  )}
+                  {item.stock === "low" && (
+                    <Badge color="yellow" size="sm">
+                      Low
+                    </Badge>
+                  )}
+                </Group>
+              </Table.Td>
+              <Table.Td className={classes.cashPriceContainer}>{formatCents(item.priceCents)}</Table.Td>
               <Table.Td className={classes.numberButtonContainer}>
                 <Button.Group>
                   {/* "-" and the count slide in once the quantity is above 0 */}
                   <Transition
-                    mounted={form.getValues().items[categoryKey][itemKey] !== 0}
+                    mounted={quantityOf(form.getValues().items, category, item) !== 0}
                     keepMounted
                     transition="slide-left"
                     duration={200}
@@ -172,14 +234,18 @@ export function CashierPage({ menu }: { menu: MenuCategory[] }) {
                   >
                     {(styles) => (
                       <>
-                        <Button variant="default" onClick={() => handlersRef.current[i][j]?.decrement()} style={styles}>
+                        <Button
+                          variant="default"
+                          onClick={() => handlersRef.current[formPath]?.decrement()}
+                          style={styles}
+                        >
                           -
                         </Button>
                         <NumberInput
                           style={styles}
                           classNames={{ input: classes.numberButtonInput }}
                           hideControls
-                          handlersRef={(el) => (handlersRef.current[i][j] = el)}
+                          handlersRef={(el) => (handlersRef.current[formPath] = el)}
                           min={0}
                           max={99}
                           key={form.key(formPath)}
@@ -188,7 +254,11 @@ export function CashierPage({ menu }: { menu: MenuCategory[] }) {
                       </>
                     )}
                   </Transition>
-                  <Button variant="default" onClick={() => handlersRef.current[i][j]?.increment()}>
+                  <Button
+                    variant="default"
+                    disabled={soldOut}
+                    onClick={() => handlersRef.current[formPath]?.increment()}
+                  >
                     +
                   </Button>
                 </Button.Group>
@@ -255,7 +325,7 @@ export function CashierPage({ menu }: { menu: MenuCategory[] }) {
         </Card.Section>
         <Card.Section className={classes.cashSubmit}>
           <Group>
-            <Text>Order Total: {formatPrice(total)}</Text>
+            <Text>Order Total: {formatCents(totalCents)}</Text>
             <Button type="submit">Submit</Button>
           </Group>
         </Card.Section>

@@ -4,7 +4,7 @@ export type StockLevel = "high" | "low" | "none";
 
 export interface MenuItem {
   itemName: string;
-  price: number;
+  priceCents: number;
   stock: StockLevel;
   flags?: string[];
 }
@@ -28,8 +28,8 @@ export interface Order {
   zone?: string;
   number: number;
   /** Total after the discount has been subtracted */
-  price: number;
-  discount: number;
+  totalCents: number;
+  discountCents: number;
   notes: string;
   completed: boolean;
   categories: { [categoryName: string]: OrderCategory };
@@ -40,6 +40,8 @@ export interface Specialty {
   number: number;
   notes: string;
   done: boolean;
+  /** Missing on specialty docs created before this field was added */
+  specialtyOnly?: boolean;
   timestamp: Timestamp;
   items: OrderItems;
 }

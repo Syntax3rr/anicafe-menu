@@ -1,11 +1,11 @@
 import { useEffect, useState } from "react";
-import { collection, doc, onSnapshot, orderBy, query, updateDoc, where } from "firebase/firestore";
+import { collection, doc, onSnapshot, orderBy, query, where, writeBatch } from "firebase/firestore";
 import { OrderCard } from "../components/OrderCard";
 import { OrderGrid } from "../components/OrderGrid";
 import { showUndoNotification } from "../components/undoNotification";
 import { db } from "../firebase";
 import { Specialty } from "../types";
-import { notifySnapshotError, SPECIALTY_CATEGORY } from "../utils";
+import { notifyError, notifySnapshotError, SPECIALTY_CATEGORY } from "../utils";
 
 /** Specialty station: handles the Specialty category separately from the kitchen */
 export function SpecialtyPage() {
@@ -21,18 +21,27 @@ export function SpecialtyPage() {
     [],
   );
 
-  // A specialty doc shares its ID with its parent order, so keep both in sync
-  const setDone = (orderId: string, done: boolean) =>
-    Promise.all([
-      updateDoc(doc(db, "specialty", orderId), { done }),
-      updateDoc(doc(db, "orders", orderId), { [`categories.${SPECIALTY_CATEGORY}.done`]: done }),
-    ]);
+  // A specialty doc shares its ID with its parent order, so keep both in sync. Specialty-only
+  // orders never reach the Servers tab, so finishing the specialty finishes the whole order.
+  const setDone = ({ id, specialtyOnly }: Specialty, done: boolean) => {
+    const batch = writeBatch(db);
+    batch.update(doc(db, "specialty", id), { done });
+    batch.update(doc(db, "orders", id), {
+      [`categories.${SPECIALTY_CATEGORY}.done`]: done,
+      ...(specialtyOnly && { completed: done }),
+    });
+    return batch.commit();
+  };
 
-  const completeSpecialtyOrder = async (orderId: string, orderNumber: number) => {
-    await setDone(orderId, true);
-    showUndoNotification(orderId + "specialty", `Specialty order #${orderNumber} completed!`, () =>
-      setDone(orderId, false),
-    );
+  const completeSpecialtyOrder = async (specialty: Specialty) => {
+    try {
+      await setDone(specialty, true);
+      showUndoNotification(specialty.id + "specialty", `Specialty order #${specialty.number} completed!`, () =>
+        setDone(specialty, false),
+      );
+    } catch (error) {
+      notifyError(`Failed to complete specialty order #${specialty.number}`, error);
+    }
   };
 
   return (
@@ -45,11 +54,11 @@ export function SpecialtyPage() {
             number: specialty.number,
             completed: specialty.done,
             notes: specialty.notes,
-            price: 0,
-            discount: 0,
+            totalCents: 0,
+            discountCents: 0,
             categories: { [SPECIALTY_CATEGORY]: { done: false, items: specialty.items } },
           }}
-          completeOrder={() => completeSpecialtyOrder(specialty.id, specialty.number)}
+          completeOrder={() => completeSpecialtyOrder(specialty)}
         />
       ))}
     </OrderGrid>

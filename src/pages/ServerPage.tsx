@@ -4,7 +4,7 @@ import { OrderGrid } from "../components/OrderGrid";
 import { showUndoNotification } from "../components/undoNotification";
 import { db } from "../firebase";
 import { useOpenOrders } from "../hooks/useOpenOrders";
-import { SPECIALTY_CATEGORY } from "../utils";
+import { notifyError, SPECIALTY_CATEGORY } from "../utils";
 
 /** Servers: see kitchen progress and mark orders delivered */
 export function ServerPage() {
@@ -13,8 +13,12 @@ export function ServerPage() {
   const setCompleted = (orderId: string, completed: boolean) => updateDoc(doc(db, "orders", orderId), { completed });
 
   const completeOrder = async (orderId: string, orderNumber: number) => {
-    await setCompleted(orderId, true);
-    showUndoNotification(orderId, `Order #${orderNumber} completed!`, () => setCompleted(orderId, false));
+    try {
+      await setCompleted(orderId, true);
+      showUndoNotification(orderId, `Order #${orderNumber} completed!`, () => setCompleted(orderId, false));
+    } catch (error) {
+      notifyError(`Failed to complete order #${orderNumber}`, error);
+    }
   };
 
   return (
