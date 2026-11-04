@@ -3,6 +3,7 @@ import { collection, FirestoreError, onSnapshot, orderBy, query } from "firebase
 import { Tabs } from "@mantine/core";
 import { db } from "./firebase";
 import { menuCategoryFromDoc } from "./fromFirestore";
+import { migrateLegacyPrices } from "./migrateLegacyPrices";
 import { MenuCategory } from "./types";
 import { AllOrdersPage } from "./pages/AllOrdersPage";
 import { CashierPage } from "./pages/CashierPage";
@@ -15,6 +16,10 @@ import "./App.css";
 function App() {
   const [menu, setMenu] = useState<MenuCategory[] | null>(null);
   const [loadError, setLoadError] = useState<FirestoreError | null>(null);
+
+  useEffect(() => {
+    migrateLegacyPrices();
+  }, []);
 
   useEffect(
     () =>

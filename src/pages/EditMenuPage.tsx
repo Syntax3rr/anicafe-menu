@@ -202,6 +202,7 @@ export function EditMenuPage({ menu }: { menu: MenuCategory[] }) {
                     <NumberInput
                       value={item.price}
                       min={0}
+                      prefix="$"
                       decimalScale={2}
                       fixedDecimalScale
                       onChange={(val) => handleItemChange(catIndex, itemIndex, "price", val)}
