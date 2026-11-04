@@ -1,50 +1,93 @@
-# React + TypeScript + Vite
+# Anicafe Menu System
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+A small real-time ordering system for running a café-style event. A cashier takes orders on one device, and the orders show up on the other stations' screens right away (kitchen/bar, servers, specialty station). Everything syncs through Firebase Cloud Firestore.
 
-Currently, two official plugins are available:
+The app is deployed to GitHub Pages at https://yuqiaoj.github.io/anicafe-menu/.
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react/README.md) uses [Babel](https://babeljs.io/) for Fast Refresh
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react-swc) uses [SWC](https://swc.rs/) for Fast Refresh
+## Tabs / stations
 
-## Expanding the ESLint configuration
+| Tab            | Who uses it        | What it does                                                                                                                                                                           |
+| -------------- | ------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Cashier**    | Front counter      | Builds an order from the menu (+/- per item) and takes an order number, an optional discount, a seating zone (Bar / Cashier / Stage / Volunteer / Undecided) and notes. A modal asks for confirmation before submitting. |
+| **Food/Drink** | Kitchen / bar      | Live list of open orders (excluding the Specialty category). Staff tick off each category (e.g. Food, Drinks) once it's prepared.                                                       |
+| **Servers**    | Floor staff        | The same open orders, read-only checkboxes, plus a **Complete** button once the order has been delivered. An 8-second toast offers **Undo**.                                              |
+| **Specialty**  | Specialty station  | Open items from the `Specialty` category, handled separately from the regular kitchen. Completing one also marks the Specialty category as done on the parent order.                     |
+| **Edit Menu**  | Organizers         | Edit item names, prices, stock level and dietary flags (NF, DF, GF, VG, `*` = contains pork), and add or remove items. Saves all categories in one batch.                                 |
+| **All Orders** | Organizers         | Sales analytics (total orders, items, revenue and quantity sold per item) and a full log of all orders.                                                                                |
 
-If you are developing a production application, we recommend updating the configuration to enable type aware lint rules:
+## Tech stack
 
-- Configure the top-level `parserOptions` property like this:
+- React 18 + TypeScript, built with Vite
+- [Mantine 7](https://mantine.dev/) for UI (core, form, modals, notifications)
+- Firebase Cloud Firestore for storage and live updates (`onSnapshot`)
+- `gh-pages` for deployment
 
-```js
-export default tseslint.config({
-  languageOptions: {
-    // other options...
-    parserOptions: {
-      project: ['./tsconfig.node.json', './tsconfig.app.json'],
-      tsconfigRootDir: import.meta.dirname,
-    },
-  },
-})
+## Project structure
+
+```
+src/
+  main.tsx              Entry point: Mantine, modal and notification providers
+  App.tsx               Loads the menu and renders the station tabs
+  firebase.ts           Firebase init (reads VITE_* env vars)
+  types.ts              Menu, order and specialty types
+  utils.ts              Price formatting, zones, form-key escaping, error toasts
+  hooks/useOpenOrders.ts  Live query shared by the Food/Drink and Servers tabs
+  components/           OrderCard, OrderGrid, undo toast
+  pages/                One file per tab (Cashier, Kitchen, Server, Specialty, EditMenu, AllOrders)
 ```
 
-- Replace `tseslint.configs.recommended` to `tseslint.configs.recommendedTypeChecked` or `tseslint.configs.strictTypeChecked`
-- Optionally add `...tseslint.configs.stylisticTypeChecked`
-- Install [eslint-plugin-react](https://github.com/jsx-eslint/eslint-plugin-react) and update the config:
+## Firestore data model
 
-```js
-// eslint.config.js
-import react from 'eslint-plugin-react'
+| Collection  | Document ID          | Shape                                                                                                                                                       |
+| ----------- | -------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `menu`      | category name        | `{ categoryName, items: [{ itemName, price, stock: "high" \| "low" \| "none", flags?: string[] }] }`                                                        |
+| `orders`    | auto ID              | `{ number, price, discount, notes, zone, completed, specialtyOnly, timestamp, categories: { [category]: { done, items: { [itemName]: { quantity } } } } }` |
+| `specialty` | same ID as the order | `{ number, notes, done, timestamp, items: { [itemName]: { quantity } } }`                                                                                   |
 
-export default tseslint.config({
-  // Set the react version
-  settings: { react: { version: '18.3' } },
-  plugins: {
-    // Add the react plugin
-    react,
-  },
-  rules: {
-    // other rules...
-    // Enable its recommended rules
-    ...react.configs.recommended.rules,
-    ...react.configs['jsx-runtime'].rules,
-  },
-})
-```
+`price` on an order is the total **after** the discount has been subtracted.
+
+The category names `Specialty`, `Food` and `Drinks` are hard-coded in the UI: Specialty items are routed to the Specialty tab, and the All Orders table has a column for each of the three.
+
+### Required composite indexes
+
+The live queries combine filters with `orderBy`, so Firestore needs these composite indexes (if one is missing, the Firestore error in the browser console includes a link that creates it):
+
+- `orders`: `completed` ASC, `specialtyOnly` ASC, `timestamp` ASC
+- `specialty`: `done` ASC, `timestamp` ASC
+
+## Setup
+
+1. Create a Firebase project with Cloud Firestore enabled.
+2. Create a `.env` file in the repo root with the web app config:
+
+   ```env
+   VITE_API_KEY=...
+   VITE_AUTH_DOMAIN=...
+   VITE_PROJECT_ID=...
+   VITE_STORAGE_BUCKET=...
+   VITE_MESSAGING_SENDER_ID=...
+   VITE_APP_ID=...
+   VITE_MEASUREMENT_ID=...
+   ```
+
+3. Seed the `menu` collection with at least one category document (see the data model above). The app shows "Loading menu..." until the menu snapshot arrives.
+4. Install and run:
+
+   ```sh
+   npm install
+   npm run dev
+   ```
+
+> **Security note:** the app has no authentication. Anyone who has the URL can read and write orders and edit the menu, unless your Firestore security rules restrict access. Set rules that fit your event before you deploy.
+
+## Scripts
+
+| Command           | Description                                              |
+| ----------------- | -------------------------------------------------------- |
+| `npm run dev`     | Start the Vite dev server                                |
+| `npm run build`   | Type-check (`tsc -b`) and build to `dist/`               |
+| `npm run preview` | Serve the production build locally                       |
+| `npm run lint`    | Run ESLint                                               |
+| `npm run deploy`  | Build, then publish `dist/` to the `gh-pages` branch      |
+
+The Vite `base` is set to `/anicafe-menu/` to match the GitHub Pages URL. Change it in `vite.config.ts` if you deploy somewhere else. The `.env` values are baked in at build time, so `npm run deploy` needs the `.env` file to be present.
