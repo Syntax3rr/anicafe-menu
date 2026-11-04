@@ -15,7 +15,14 @@ const ZONE_COLORS: Record<string, string> = {
 
 export const zoneToColor = (zone: string) => ZONE_COLORS[zone] ?? "gray";
 
-export const formatPrice = (value: number) => value.toLocaleString("en-US", { style: "currency", currency: "USD" });
+export const formatCents = (cents: number) =>
+  (cents / 100).toLocaleString("en-US", { style: "currency", currency: "USD" });
+
+/** Dollar amount from a NumberInput (a string while partially typed, e.g. "1.") to integer cents */
+export const toCents = (dollars: number | string) => {
+  const value = typeof dollars === "number" ? dollars : parseFloat(dollars);
+  return Number.isFinite(value) ? Math.round(value * 100) : 0;
+};
 
 /** Sort `Object.entries` output by key */
 export const byKey = <T>([a]: [string, T], [b]: [string, T]) => a.localeCompare(b);

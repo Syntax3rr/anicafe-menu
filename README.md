@@ -40,11 +40,13 @@ src/
 
 | Collection  | Document ID          | Shape                                                                                                                                                       |
 | ----------- | -------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `menu`      | category name        | `{ categoryName, items: [{ itemName, price, stock: "high" \| "low" \| "none", flags?: string[] }] }`                                                        |
-| `orders`    | auto ID              | `{ number, price, discount, notes, zone, completed, specialtyOnly, timestamp, categories: { [category]: { done, items: { [itemName]: { quantity } } } } }` |
-| `specialty` | same ID as the order | `{ number, notes, done, timestamp, items: { [itemName]: { quantity } } }`                                                                                   |
+| `menu`      | category name        | `{ categoryName, items: [{ itemName, priceCents, stock: "high" \| "low" \| "none", flags?: string[] }] }`                                                        |
+| `orders`    | auto ID              | `{ number, totalCents, discountCents, notes, zone, completed, specialtyOnly, timestamp, categories: { [category]: { done, items: { [itemName]: { quantity } } } } }` |
+| `specialty` | same ID as the order | `{ number, notes, done, specialtyOnly, timestamp, items: { [itemName]: { quantity } } }`                                                                                   |
 
-`price` on an order is the total **after** the discount has been subtracted.
+All money is stored as integer cents. `totalCents` on an order is the total **after** the discount has been subtracted. Data saved in the old format (float dollars in `price` / `discount`) is still read correctly, and saving the menu from Edit Menu rewrites it in the new format.
+
+Order numbers are entered by the cashier and can be reused once the earlier order is completed. If the number matches an order that's still open, the review modal shows a warning, but the cashier can still submit.
 
 The category names `Specialty`, `Food` and `Drinks` are hard-coded in the UI: Specialty items are routed to the Specialty tab, and the All Orders table has a column for each of the three.
 

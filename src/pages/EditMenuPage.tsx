@@ -17,10 +17,14 @@ import {
 import { modals } from "@mantine/modals";
 import { db } from "../firebase";
 import { MenuCategory, MenuItem, StockLevel } from "../types";
-import { notifyError } from "../utils";
+import { notifyError, toCents } from "../utils";
 
-/** Flags are edited as a comma-separated string so typing commas works */
-interface EditableMenuItem extends Omit<MenuItem, "flags"> {
+/**
+ * Fields are kept as typed while editing and converted on save: the price in dollars
+ * (a string while partially typed, e.g. "1."), flags as a comma-separated string
+ */
+interface EditableMenuItem extends Omit<MenuItem, "flags" | "priceCents"> {
+  price: number | string;
   flagsString: string;
 }
 
@@ -52,16 +56,21 @@ const parseFlags = (flagsString: string) =>
 const toEditable = (menu: MenuCategory[]): EditableMenuCategory[] =>
   menu.map((category) => ({
     categoryName: category.categoryName,
-    items: category.items.map(({ itemName, price, stock, flags }) => ({
+    items: category.items.map(({ itemName, priceCents, stock, flags }) => ({
       itemName,
-      price,
+      price: priceCents / 100,
       stock,
       flagsString: (flags ?? []).join(", "),
     })),
   }));
 
 const fromEditable = (items: EditableMenuItem[]): MenuItem[] =>
-  items.map(({ itemName, price, stock, flagsString }) => ({ itemName, price, stock, flags: parseFlags(flagsString) }));
+  items.map(({ itemName, price, stock, flagsString }) => ({
+    itemName,
+    priceCents: toCents(price),
+    stock,
+    flags: parseFlags(flagsString),
+  }));
 
 const sameMenu = (a: EditableMenuCategory[], b: EditableMenuCategory[]) => JSON.stringify(a) === JSON.stringify(b);
 
@@ -195,10 +204,7 @@ export function EditMenuPage({ menu }: { menu: MenuCategory[] }) {
                       min={0}
                       decimalScale={2}
                       fixedDecimalScale
-                      // NumberInput gives "" when cleared; never store a string price
-                      onChange={(val) =>
-                        handleItemChange(catIndex, itemIndex, "price", typeof val === "number" ? val : 0)
-                      }
+                      onChange={(val) => handleItemChange(catIndex, itemIndex, "price", val)}
                     />
                   </Table.Td>
                   <Table.Td>

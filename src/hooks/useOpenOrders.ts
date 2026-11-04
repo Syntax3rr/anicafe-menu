@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { collection, onSnapshot, orderBy, query, where } from "firebase/firestore";
 import { db } from "../firebase";
+import { orderFromDoc } from "../fromFirestore";
 import { Order } from "../types";
 import { notifySnapshotError } from "../utils";
 
@@ -17,7 +18,7 @@ export function useOpenOrders() {
           where("specialtyOnly", "==", false),
           orderBy("timestamp"),
         ),
-        (snapshot) => setOrders(snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }) as Order)),
+        (snapshot) => setOrders(snapshot.docs.map(orderFromDoc)),
         notifySnapshotError("orders"),
       ),
     [],

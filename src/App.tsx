@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { collection, FirestoreError, onSnapshot, orderBy, query } from "firebase/firestore";
 import { Tabs } from "@mantine/core";
 import { db } from "./firebase";
+import { menuCategoryFromDoc } from "./fromFirestore";
 import { MenuCategory } from "./types";
 import { AllOrdersPage } from "./pages/AllOrdersPage";
 import { CashierPage } from "./pages/CashierPage";
@@ -20,7 +21,7 @@ function App() {
       onSnapshot(
         query(collection(db, "menu"), orderBy("categoryName")),
         (snapshot) => {
-          setMenu(snapshot.docs.map((doc) => doc.data() as MenuCategory));
+          setMenu(snapshot.docs.map(menuCategoryFromDoc));
           setLoadError(null);
         },
         (error) => {

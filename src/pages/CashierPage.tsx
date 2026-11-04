@@ -1,6 +1,7 @@
 import { Fragment, useEffect, useRef, useState } from "react";
-import { collection, doc, serverTimestamp, writeBatch } from "firebase/firestore";
+import { collection, doc, onSnapshot, query, serverTimestamp, where, writeBatch } from "firebase/firestore";
 import {
+  Alert,
   Badge,
   Button,
   Card,
@@ -20,8 +21,9 @@ import { useForm } from "@mantine/form";
 import { modals } from "@mantine/modals";
 import { OrderCard } from "../components/OrderCard";
 import { db } from "../firebase";
+import { orderFromDoc } from "../fromFirestore";
 import { MenuCategory, MenuItem, Order, OrderCategory } from "../types";
-import { formatPrice, notifyError, SPECIALTY_CATEGORY, toFormKey, ZONES } from "../utils";
+import { formatCents, notifyError, notifySnapshotError, SPECIALTY_CATEGORY, toCents, toFormKey, ZONES } from "../utils";
 import classes from "../App.module.css";
 
 const MENU_COLUMNS = 2;
@@ -64,10 +66,10 @@ const quantityOf = (quantities: Quantities, category: MenuCategory, item: MenuIt
 // Both helpers walk the current menu rather than the form values, so items removed from
 // the menu mid-order (e.g. edited on another device) are dropped instead of priced as NaN
 
-const calculateTotal = (menu: MenuCategory[], quantities: Quantities) =>
+const calculateTotalCents = (menu: MenuCategory[], quantities: Quantities) =>
   menu.reduce(
     (sum, category) =>
-      category.items.reduce((sum, item) => sum + item.price * quantityOf(quantities, category, item), sum),
+      category.items.reduce((sum, item) => sum + item.priceCents * quantityOf(quantities, category, item), sum),
     0,
   );
 
@@ -88,22 +90,23 @@ function toOrderCategories(menu: MenuCategory[], quantities: Quantities): Order[
 const DEFAULT_VALUES = {
   number: null as number | null,
   notes: "",
-  discount: 0,
+  /** Dollars, as typed; converted with toCents */
+  discount: 0 as number | string,
   zone: "Undecided",
 };
 
 export function CashierPage({ menu }: { menu: MenuCategory[] }) {
-  const [total, setTotal] = useState(0);
+  const [totalCents, setTotalCents] = useState(0);
   // Keyed by form path so the menu can change shape without breaking the lookups
   const handlersRef = useRef<Record<string, NumberInputHandlers | null | undefined>>({});
 
   const form = useForm({
     mode: "uncontrolled",
     initialValues: { ...DEFAULT_VALUES, items: emptyQuantities(menu) },
-    onValuesChange: (values) => setTotal(calculateTotal(menu, values.items) - values.discount),
+    onValuesChange: (values) => setTotalCents(calculateTotalCents(menu, values.items) - toCents(values.discount)),
     validate: {
       number: (value: number | null) => (value && value > 0 ? null : "Order number is required"),
-      discount: () => (total >= 0 ? null : "Discount greater than order total"),
+      discount: () => (totalCents >= 0 ? null : "Discount greater than order total"),
     },
   });
 
@@ -120,31 +123,55 @@ export function CashierPage({ menu }: { menu: MenuCategory[] }) {
     }
     form.setInitialValues({ ...DEFAULT_VALUES, items: emptyQuantities(menu) });
     const values = form.getValues();
-    setTotal(calculateTotal(menu, values.items) - values.discount);
+    setTotalCents(calculateTotalCents(menu, values.items) - toCents(values.discount));
     // Only re-run when the menu changes, not on every new `form` object
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [menu]);
 
+  // Order numbers are recycled, so only a still-open order with the same number is a duplicate.
+  // Kept live (rather than queried on submit) so the check is instant and works offline.
+  const [openOrders, setOpenOrders] = useState<Order[]>([]);
+  useEffect(
+    () =>
+      onSnapshot(
+        query(collection(db, "orders"), where("completed", "==", false)),
+        (snapshot) => setOpenOrders(snapshot.docs.map(orderFromDoc)),
+        notifySnapshotError("open orders"),
+      ),
+    [],
+  );
+
   const handleSubmit = (values: typeof form.values) => {
     const order: Order = {
       number: values.number ?? 0, // never 0 thanks to validation
-      price: total,
-      discount: values.discount,
+      totalCents,
+      discountCents: toCents(values.discount),
       notes: values.notes,
       completed: false,
       zone: values.zone,
       categories: toOrderCategories(menu, values.items),
     };
 
+    const duplicate = openOrders.find((openOrder) => openOrder.number === order.number);
+    // The timestamp is null until the server has confirmed the write
+    const placedAt = duplicate?.timestamp?.toDate().toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
+
     modals.openConfirmModal({
       title: "Review Order",
       children: (
         <Stack>
+          {duplicate && (
+            <Alert color="orange" title={`Order #${order.number} is already open`}>
+              It was placed {placedAt ? `at ${placedAt}` : "just now"} and hasn't been completed. Only submit if you're
+              sure this number is free.
+            </Alert>
+          )}
           <Text size="sm">Please confirm that the order details are correct:</Text>
           <OrderCard order={order} />
         </Stack>
       ),
-      labels: { confirm: "Confirm", cancel: "Cancel" },
+      labels: { confirm: duplicate ? "Submit anyway" : "Confirm", cancel: "Cancel" },
+      confirmProps: duplicate && { color: "orange" },
       onConfirm: async () => {
         try {
           await saveOrder(order);
@@ -194,7 +221,7 @@ export function CashierPage({ menu }: { menu: MenuCategory[] }) {
                   )}
                 </Group>
               </Table.Td>
-              <Table.Td className={classes.cashPriceContainer}>{formatPrice(item.price)}</Table.Td>
+              <Table.Td className={classes.cashPriceContainer}>{formatCents(item.priceCents)}</Table.Td>
               <Table.Td className={classes.numberButtonContainer}>
                 <Button.Group>
                   {/* "-" and the count slide in once the quantity is above 0 */}
@@ -298,7 +325,7 @@ export function CashierPage({ menu }: { menu: MenuCategory[] }) {
         </Card.Section>
         <Card.Section className={classes.cashSubmit}>
           <Group>
-            <Text>Order Total: {formatPrice(total)}</Text>
+            <Text>Order Total: {formatCents(totalCents)}</Text>
             <Button type="submit">Submit</Button>
           </Group>
         </Card.Section>

@@ -54,8 +54,8 @@ export function SpecialtyPage() {
             number: specialty.number,
             completed: specialty.done,
             notes: specialty.notes,
-            price: 0,
-            discount: 0,
+            totalCents: 0,
+            discountCents: 0,
             categories: { [SPECIALTY_CATEGORY]: { done: false, items: specialty.items } },
           }}
           completeOrder={() => completeSpecialtyOrder(specialty)}
