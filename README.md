@@ -1,20 +1,20 @@
 # Anicafe Menu System
 
-A real-time ordering app for café events. Cashiers, kitchen staff, servers, and the specialty station share orders through Cloud Firestore.
+A real-time ordering app for café events. Cashiers, prep staff, and servers share orders through Cloud Firestore.
 
 [Open the app](https://yuqiaoj.github.io/anicafe-menu/)
 
-## Stations
+## Tabs
 
 | Tab | Purpose |
 | --- | --- |
 | Cashier | Create orders, apply discounts, and assign seating zones. Open order numbers trigger a warning. |
-| Prep | Pick one or more stations, or All, to track their open orders and mark categories as prepared. |
+| Prep | Track open orders and mark categories as prepared. All categories show by default; turn some off to focus on a station's share. |
 | Servers | See every category's preparation status and mark orders as delivered. |
-| Edit Menu | Unlock editing to add or remove categories, assign them to stations, and manage items, prices, stock, and dietary flags. Saves check for concurrent changes. |
+| Edit Menu | Unlock editing to add or remove categories and manage items, prices, stock, and dietary flags. Saves check for concurrent changes. |
 | All Orders | View order history and sales totals, filtered by search, date, status, seating zone, or category. |
 
-The Cashier and Edit Menu tabs retain unfinished work when switching tabs. Each device remembers its last tab, Prep stations, and color scheme.
+The Cashier and Edit Menu tabs retain unfinished work when switching tabs. Each device remembers its last tab, Prep categories, and color scheme.
 
 ## Setup
 
@@ -36,7 +36,6 @@ The Cashier and Edit Menu tabs retain unfinished work when switching tabs. Each 
    ```json
    {
      "categoryName": "Drinks",
-     "station": "Bar",
      "items": [
        { "itemName": "Tea", "priceCents": 350, "stock": "high", "flags": [] }
      ]
@@ -55,12 +54,12 @@ The Cashier and Edit Menu tabs retain unfinished work when switching tabs. Each 
 
 | Collection | Document ID | Fields |
 | --- | --- | --- |
-| `menu` | Category name | `categoryName`, `station`, `items` (`itemName`, `priceCents`, `stock`, optional `flags`) |
+| `menu` | Category name | `categoryName`, `items` (`itemName`, `priceCents`, `stock`, optional `flags`) |
 | `orders` | Auto-generated | `number`, `totalCents`, `discountCents`, `notes`, `zone`, `completed`, `specialtyOnly`, `timestamp`, `categories` |
 
 Stock is `high`, `low`, or `none`. Order categories contain a `done` flag and items keyed by name, each with a `quantity`.
 
-Each category's `station` names the station that prepares it, and stations are created by naming them. Categories saved before stations existed default to a `Specialty` station for the `Specialty` category and `Food/Drink` for the rest. The Prep tab follows the current menu, so reassigning a category moves its open orders. `specialtyOnly` is kept only to recognize old specialty-only orders. The `specialty` collection used by earlier versions is no longer read and can be deleted.
+`specialtyOnly` is kept only to recognize old specialty-only orders. The `specialty` collection used by earlier versions is no longer read and can be deleted.
 
 Prices are stored in integer cents and displayed in dollars. An order's `totalCents` is the amount after its discount. Readers also accept legacy dollar prices.
 
@@ -70,7 +69,7 @@ No composite indexes are required.
 
 ## Development
 
-The app uses React, TypeScript, Vite, Mantine, and Firebase. Station pages live in `src/pages`, shared UI in `src/components`, and shared hooks in `src/hooks`.
+The app uses React, TypeScript, Vite, Mantine, and Firebase. Tab pages live in `src/pages`, shared UI in `src/components`, and shared hooks in `src/hooks`.
 
 | Command | Purpose |
 | --- | --- |

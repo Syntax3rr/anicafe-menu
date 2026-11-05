@@ -11,7 +11,6 @@ export interface MenuItem {
 
 export interface MenuCategory {
   categoryName: string;
-  station: string;
   items: MenuItem[];
 }
 

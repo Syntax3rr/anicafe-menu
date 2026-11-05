@@ -2,7 +2,6 @@ import { useEffect, useMemo, useState } from "react";
 import { doc, runTransaction } from "firebase/firestore";
 import {
   Alert,
-  Autocomplete,
   Badge,
   Button,
   Card,
@@ -22,7 +21,7 @@ import { EmptyState } from "../components/StatusMessage";
 import { db } from "../firebase";
 import { menuCategoryFromDoc } from "../fromFirestore";
 import { MenuCategory, MenuItem, StockLevel } from "../types";
-import { notifyError, stationNames, toCents } from "../utils";
+import { notifyError, toCents } from "../utils";
 
 /** Prices remain in dollars while editing and are converted to cents on save. */
 interface EditableMenuItem extends Omit<MenuItem, "flags" | "priceCents"> {
@@ -32,7 +31,6 @@ interface EditableMenuItem extends Omit<MenuItem, "flags" | "priceCents"> {
 
 interface EditableMenuCategory {
   categoryName: string;
-  station: string;
   items: EditableMenuItem[];
 }
 
@@ -64,7 +62,6 @@ const STOCK_OPTIONS = [
 const toEditable = (menu: MenuCategory[]): EditableMenuCategory[] =>
   menu.map((category) => ({
     categoryName: category.categoryName,
-    station: category.station,
     items: category.items.map(({ itemName, priceCents, stock, flags }) => ({
       itemName,
       price: priceCents / 100,
@@ -102,15 +99,9 @@ const sameMenu = (a: EditableMenuCategory[], b: EditableMenuCategory[]) => JSON.
 const sameCategory = (a: MenuCategory, b: MenuCategory) => sameMenu(toEditable([a]), toEditable([b]));
 
 const toSavedMenu = (menu: EditableMenuCategory[]): MenuCategory[] =>
-  menu.map((category) => ({
-    categoryName: category.categoryName,
-    station: category.station.trim(),
-    items: fromEditable(category.items),
-  }));
+  menu.map((category) => ({ categoryName: category.categoryName, items: fromEditable(category.items) }));
 
 function menuError(menu: MenuCategory[]) {
-  const noStation = menu.find((category) => !category.station);
-  if (noStation) return `Choose a station for ${noStation.categoryName}.`;
   const invalid = menu.find((category) => {
     const names = category.items.map((item) => item.itemName);
     return names.some((name) => !name) || new Set(names).size !== names.length;
@@ -148,10 +139,6 @@ export function EditMenuPage({ menu, active }: { menu: MenuCategory[]; active: b
     return [...new Set(used)].filter((flag) => !STANDARD_FLAGS.includes(flag)).sort();
   }, [editedMenu]);
   const flagOptions = useMemo(() => [...STANDARD_FLAGS, ...customFlags], [customFlags]);
-  const stations = useMemo(
-    () => stationNames(editedMenu.map((category) => ({ station: category.station.trim() }))).filter(Boolean),
-    [editedMenu],
-  );
 
   const hasUnsavedChanges = useMemo(() => !sameMenu(editedMenu, toEditable(baseMenu)), [editedMenu, baseMenu]);
 
@@ -199,10 +186,6 @@ export function EditMenuPage({ menu, active }: { menu: MenuCategory[]; active: b
   ) => updateItems(catIndex, (items) => items.map((item, j) => (j === itemIndex ? { ...item, [field]: value } : item)));
 
   const handleAddItem = (catIndex: number) => updateItems(catIndex, (items) => [...items, NEW_ITEM]);
-
-  const handleStationChange = (catIndex: number, station: string) =>
-    setEditedMenu((prev) => prev.map((category, i) => (i === catIndex ? { ...category, station } : category)));
-
   const isUnsavedCategory = (categoryName: string) => !baseMenu.some((c) => c.categoryName === categoryName);
 
   const handleAddCategory = () => {
@@ -210,8 +193,7 @@ export function EditMenuPage({ menu, active }: { menu: MenuCategory[]; active: b
     const error = categoryNameError(categoryName, editedMenu);
     setNewCategoryError(error);
     if (error) return;
-    const station = stations[0] ?? "Kitchen";
-    setEditedMenu((prev) => [...prev, { categoryName, station, items: [NEW_ITEM] }].sort(byCategoryName));
+    setEditedMenu((prev) => [...prev, { categoryName, items: [NEW_ITEM] }].sort(byCategoryName));
     setNewCategoryName("");
   };
 
@@ -244,7 +226,6 @@ export function EditMenuPage({ menu, active }: { menu: MenuCategory[]; active: b
       notifyError("Invalid menu", invalid);
       return;
     }
-    // A missing `next` deletes the category.
     const writes = [
       ...changedCategories(savedMenu, baseMenu).map((next) => ({ categoryName: next.categoryName, next })),
       ...removedCategories(savedMenu, baseMenu).map(({ categoryName }) => ({ categoryName, next: undefined })),
@@ -371,19 +352,8 @@ export function EditMenuPage({ menu, active }: { menu: MenuCategory[]; active: b
 
         {editedMenu.map((category, catIndex) => (
           <Card key={category.categoryName} shadow="sm" radius="md" p="md">
-            <Group justify="space-between" align="flex-end" mb="sm">
-              <Group align="flex-end" gap="md">
-                <Title order={4}>{category.categoryName}</Title>
-                <Autocomplete
-                  label="Station"
-                  placeholder="Pick or type a station"
-                  data={stations}
-                  value={category.station}
-                  onChange={(station) => handleStationChange(catIndex, station)}
-                  error={category.station.trim() === "" ? "Required" : undefined}
-                  w={200}
-                />
-              </Group>
+            <Group justify="space-between" mb="sm">
+              <Title order={4}>{category.categoryName}</Title>
               <Group gap="xs">
                 <Button
                   size="xs"
@@ -499,8 +469,7 @@ export function EditMenuPage({ menu, active }: { menu: MenuCategory[]; active: b
             </Button>
           </Group>
           <Text size="xs" c="dimmed" mt="xs">
-            New categories are saved with Save Changes. The Prep tab can show one or more stations, each with the
-            categories assigned to it. Type a new name into a Station box to create a station.
+            New categories are saved with Save Changes and appear on the Prep tab of every device.
           </Text>
         </Card>
       </fieldset>

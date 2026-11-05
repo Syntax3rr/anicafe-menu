@@ -26,7 +26,7 @@ function OrderAge({ placedAtMs }: { placedAtMs: number }) {
 
 interface OrderCardProps {
   order: Order;
-  /** Categories to show; omit to show all. */
+  /** Omit to show all. */
   categories?: string[];
   completeOrder?: () => Promise<void>;
   /** "view" is read-only; omit to hide checkboxes. */

@@ -1,6 +1,5 @@
 import { DocumentData, QueryDocumentSnapshot } from "firebase/firestore";
 import { MenuCategory, PersistedOrder } from "./types";
-import { legacyStation } from "./utils";
 
 // Read legacy dollar prices as well as prices in cents.
 
@@ -11,11 +10,7 @@ const toCentsMenuItems = (items: DocumentData[] = []) =>
 
 export const menuCategoryFromDoc = (snapshot: QueryDocumentSnapshot<DocumentData>): MenuCategory => {
   const data = snapshot.data();
-  return {
-    categoryName: data.categoryName,
-    station: data.station ?? legacyStation(data.categoryName),
-    items: toCentsMenuItems(data.items),
-  } as MenuCategory;
+  return { categoryName: data.categoryName, items: toCentsMenuItems(data.items) } as MenuCategory;
 };
 
 export const orderFromDoc = (snapshot: QueryDocumentSnapshot<DocumentData>): PersistedOrder => {

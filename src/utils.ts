@@ -1,22 +1,10 @@
 import { FirestoreError } from "firebase/firestore";
 import { notifications } from "@mantine/notifications";
-import { MenuCategory } from "./types";
-
-const SPECIALTY_CATEGORY = "Specialty";
-
-/** Menus saved before stations existed sent the Specialty category to its own station. */
-export const legacyStation = (categoryName: string) =>
-  categoryName === SPECIALTY_CATEGORY ? SPECIALTY_CATEGORY : "Food/Drink";
 
 export const isSpecialtyOnly = (categories: Record<string, unknown>) => {
   const names = Object.keys(categories);
-  return names.length === 1 && names[0] === SPECIALTY_CATEGORY;
+  return names.length === 1 && names[0] === "Specialty";
 };
-
-export const stationNames = (menu: { station: string }[]) => [...new Set(menu.map((c) => c.station))].sort();
-
-export const stationCategories = (menu: MenuCategory[], stations: string[]) =>
-  menu.filter((category) => stations.includes(category.station)).map((category) => category.categoryName);
 
 /** Omit `categories` to require every category in the order. */
 export const isOrderReady = (order: { categories: Record<string, { done: boolean }> }, categories?: string[]) => {

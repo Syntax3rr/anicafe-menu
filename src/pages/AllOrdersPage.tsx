@@ -34,7 +34,7 @@ interface OrderFilters {
   status: StatusFilter;
   zones: string[];
   categories: string[];
-  /** Inclusive local dates as YYYY-MM-DD, or empty for no limit. */
+  /** YYYY-MM-DD so plain string comparison is chronological. */
   from: string;
   to: string;
   sort: SortOrder;
@@ -67,7 +67,7 @@ const logCategories = (orders: Order[], menu: MenuCategory[]) => {
   return [...menuNames, ...pastNames];
 };
 
-/** Order numbers match exactly; notes and item names match any part of the text. */
+/** Order numbers match exactly so "12" doesn't also find #112. */
 const matchesSearch = (order: Order, search: string) => {
   const term = search.trim().toLowerCase();
   if (term === "") return true;
@@ -109,7 +109,7 @@ const itemsToString = (items: OrderItems | undefined) =>
         .map(([itemName, { quantity }]) => `${quantity} ${itemName}`)
         .join(", ");
 
-/** `categories` limits the item counts and log columns; revenue always covers whole orders. */
+/** Revenue ignores the category filter because discounts apply to whole orders. */
 function computeAnalytics(orders: Order[], menu: MenuCategory[], categories: string[]) {
   const shown = (categoryName: string) => categories.length === 0 || categories.includes(categoryName);
   const lineItems = orders.flatMap((order) =>

@@ -8,7 +8,7 @@ import { db } from "../firebase";
 import { useFlashIds } from "../hooks/useFlashIds";
 import { useOpenOrders } from "../hooks/useOpenOrders";
 import { MenuCategory } from "../types";
-import { notifyError, stationCategories, stationNames } from "../utils";
+import { notifyError } from "../utils";
 
 const checkCategory = async (orderId: string, categoryName: string, value: boolean) => {
   try {
@@ -20,15 +20,14 @@ const checkCategory = async (orderId: string, categoryName: string, value: boole
 };
 
 export function PrepPage({ menu }: { menu: MenuCategory[] }) {
-  const stations = stationNames(menu);
-  const [savedStations, setSavedStations] = useLocalStorage<string[]>({
-    key: "anicafe-prep-stations",
+  const allCategories = menu.map((category) => category.categoryName);
+  // Store hidden rather than shown categories so new categories are shown by default.
+  const [hidden, setHidden] = useLocalStorage<string[]>({
+    key: "anicafe-prep-hidden-categories",
     defaultValue: [],
     getInitialValueInEffect: false,
   });
-  // A station may have been removed since this device chose it. No selection shows every station.
-  const selected = savedStations.filter((station) => stations.includes(station));
-  const categories = stationCategories(menu, selected.length > 0 ? selected : stations);
+  const categories = allCategories.filter((name) => !hidden.includes(name));
 
   const { orders, error } = useOpenOrders();
   // Track all open orders so changing the selection doesn't flash existing orders as new.
@@ -40,14 +39,10 @@ export function PrepPage({ menu }: { menu: MenuCategory[] }) {
   let content;
   if (error) content = <ErrorState title="Failed to load orders" message={error} />;
   else if (shownOrders === null) content = <LoadingState label="Loading orders..." />;
+  else if (categories.length === 0)
+    content = <EmptyState title="No categories selected">Turn on a category above to see its orders.</EmptyState>;
   else if (shownOrders.length === 0)
-    content = (
-      <EmptyState title="No open orders">
-        {selected.length > 0
-          ? `Orders for ${selected.join(", ")} will appear here.`
-          : "Orders from the cashier will appear here."}
-      </EmptyState>
-    );
+    content = <EmptyState title="No open orders">Orders from the cashier will appear here.</EmptyState>;
   else
     content = (
       <OrderGrid>
@@ -66,16 +61,20 @@ export function PrepPage({ menu }: { menu: MenuCategory[] }) {
 
   return (
     <Stack>
-      {stations.length > 1 && (
+      {allCategories.length > 1 && (
         <Group gap="sm">
-          <Text fw={600}>Stations</Text>
-          <Chip size="md" checked={selected.length === 0} onChange={() => setSavedStations([])}>
+          <Text fw={600}>Show</Text>
+          <Chip size="md" checked={categories.length === allCategories.length} onChange={() => setHidden([])}>
             All
           </Chip>
-          <Chip.Group multiple value={selected} onChange={setSavedStations}>
-            {stations.map((station) => (
-              <Chip key={station} size="md" value={station}>
-                {station}
+          <Chip.Group
+            multiple
+            value={categories}
+            onChange={(shown) => setHidden(allCategories.filter((name) => !shown.includes(name)))}
+          >
+            {allCategories.map((name) => (
+              <Chip key={name} size="md" value={name}>
+                {name}
               </Chip>
             ))}
           </Chip.Group>
