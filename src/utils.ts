@@ -3,6 +3,12 @@ import { notifications } from "@mantine/notifications";
 
 export const SPECIALTY_CATEGORY = "Specialty";
 
+/** True when an order's only category is Specialty, so it never goes to the kitchen or servers */
+export const isSpecialtyOnly = (categories: Record<string, unknown>) => {
+  const names = Object.keys(categories);
+  return names.length === 1 && names[0] === SPECIALTY_CATEGORY;
+};
+
 export const ZONES = ["Bar", "Cashier", "Stage", "Undecided", "Volunteer"] as const;
 
 const ZONE_COLORS: Record<string, string> = {

@@ -67,7 +67,8 @@ const toEditable = (menu: MenuCategory[]): EditableMenuCategory[] =>
 
 const fromEditable = (items: EditableMenuItem[]): MenuItem[] =>
   items.map(({ itemName, price, stock, flagsString }) => ({
-    itemName,
+    // Stray whitespace would make e.g. "Latte " a separate item in orders and analytics
+    itemName: itemName.trim(),
     priceCents: toCents(price),
     stock,
     flags: parseFlags(flagsString),
@@ -120,7 +121,7 @@ export function EditMenuPage({ menu }: { menu: MenuCategory[] }) {
       items: fromEditable(category.items),
     }));
     for (const category of savedMenu) {
-      const names = category.items.map((item) => item.itemName.trim());
+      const names = category.items.map((item) => item.itemName);
       if (names.some((name) => !name) || new Set(names).size !== names.length) {
         notifyError("Invalid menu", `Item names in ${category.categoryName} must be nonempty and unique.`);
         return;
