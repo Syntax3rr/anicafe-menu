@@ -11,7 +11,7 @@ A real-time ordering app for café events. Cashiers, prep staff, and servers sha
 | Cashier | Create orders, apply discounts, and assign seating zones. Open order numbers trigger a warning. |
 | Prep | Track open orders and mark categories as prepared. All categories show by default; turn some off to focus on a station's share. |
 | Servers | See every category's preparation status and mark orders as delivered. |
-| Edit Menu | Unlock editing to add or remove categories and manage items, prices, stock, and dietary flags. Saves check for concurrent changes. |
+| Edit Menu | Unlock editing to add or remove categories, drag categories and items into order, and manage items, prices, stock, and dietary flags. Saves check for concurrent changes. |
 | All Orders | View order history and sales totals, filtered by search, date, status, seating zone, or category. |
 
 The Cashier and Edit Menu tabs retain unfinished work when switching tabs. Each device remembers its last tab, Prep categories, and color scheme.
@@ -36,6 +36,7 @@ The Cashier and Edit Menu tabs retain unfinished work when switching tabs. Each 
    ```json
    {
      "categoryName": "Drinks",
+     "position": 0,
      "items": [
        { "itemName": "Tea", "priceCents": 350, "stock": "high", "flags": [] }
      ]
@@ -54,8 +55,10 @@ The Cashier and Edit Menu tabs retain unfinished work when switching tabs. Each 
 
 | Collection | Document ID | Fields |
 | --- | --- | --- |
-| `menu` | Category name | `categoryName`, `items` (`itemName`, `priceCents`, `stock`, optional `flags`) |
+| `menu` | Category name | `categoryName`, `position`, `items` (`itemName`, `priceCents`, `stock`, optional `flags`) |
 | `orders` | Auto-generated | `number`, `totalCents`, `discountCents`, `notes`, `zone`, `completed`, `specialtyOnly`, `timestamp`, `categories` |
+
+Categories appear in ascending `position` on every tab. Categories without a `position` come last, in name order, and get one the next time the menu is saved. Items appear in the order of the `items` array.
 
 Stock is `high`, `low`, or `none`. Order categories contain a `done` flag and items keyed by name, each with a `quantity`.
 
