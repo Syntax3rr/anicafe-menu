@@ -1,0 +1,24 @@
+/* Glow that pulses around a newly arrived order */
+.new {
+  animation: newOrderPulse 1.2s ease-in-out infinite;
+}
+
+@keyframes newOrderPulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 2px var(--mantine-color-blue-filled);
+  }
+  50% {
+    box-shadow:
+      0 0 0 4px var(--mantine-color-blue-filled),
+      0 0 24px 6px var(--mantine-color-blue-filled);
+  }
+}
+
+/* Steady highlight instead of pulsing for people who turn off animations */
+@media (prefers-reduced-motion: reduce) {
+  .new {
+    animation: none;
+    box-shadow: 0 0 0 4px var(--mantine-color-blue-filled);
+  }
+}

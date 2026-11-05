@@ -127,18 +127,22 @@ export function EditMenuPage({ menu }: { menu: MenuCategory[] }) {
         return;
       }
     }
-    const changed = savedMenu.filter((category, i) =>
-      !sameMenu(toEditable([category]), toEditable([baseMenu[i]])),
-    );
+    const changed = savedMenu.filter((category, i) => !sameMenu(toEditable([category]), toEditable([baseMenu[i]])));
     if (changed.length === 0) return;
     setSaving(true);
     try {
       await runTransaction(db, async (transaction) => {
-        const snapshots = await Promise.all(changed.map((category) => transaction.get(doc(db, "menu", category.categoryName))));
+        const snapshots = await Promise.all(
+          changed.map((category) => transaction.get(doc(db, "menu", category.categoryName))),
+        );
         for (let i = 0; i < changed.length; i++) {
           const snapshot = snapshots[i];
           const base = baseMenu.find((category) => category.categoryName === changed[i].categoryName);
-          if (!snapshot.exists() || !base || !sameMenu(toEditable([menuCategoryFromDoc(snapshot)]), toEditable([base]))) {
+          if (
+            !snapshot.exists() ||
+            !base ||
+            !sameMenu(toEditable([menuCategoryFromDoc(snapshot)]), toEditable([base]))
+          ) {
             throw new Error(`${changed[i].categoryName} changed on another device. Discard your edits and try again.`);
           }
         }
@@ -157,103 +161,107 @@ export function EditMenuPage({ menu }: { menu: MenuCategory[] }) {
   return (
     <Stack>
       <fieldset disabled={saving} style={{ border: 0, padding: 0, margin: 0 }}>
-      <Card shadow="sm" radius="md" p="md">
-        <Group justify="space-between">
-          <Title order={2}>Edit Menu</Title>
-          <Button onClick={handleSaveMenu} loading={saving} color={hasUnsavedChanges ? "yellow" : "blue"}>
-            {hasUnsavedChanges ? "Save Changes *" : "Save Changes"}
-          </Button>
-        </Group>
-      </Card>
-
-      {changedElsewhere && (
-        <Alert color="orange" title="The menu was changed on another device">
+        <Card shadow="sm" radius="md" p="md">
           <Group justify="space-between">
-            <Text size="sm">Saving now will overwrite those changes with yours.</Text>
-            <Button size="xs" variant="outline" color="orange" onClick={discardEdits}>
-              Discard my edits and load latest
+            <Title order={2}>Edit Menu</Title>
+            <Button onClick={handleSaveMenu} loading={saving} color={hasUnsavedChanges ? "yellow" : "blue"}>
+              {hasUnsavedChanges ? "Save Changes *" : "Save Changes"}
             </Button>
           </Group>
-        </Alert>
-      )}
-
-      <Card shadow="sm" radius="md" p="md" withBorder>
-        <Title order={4} mb="xs">
-          Flag Legend
-        </Title>
-        <List spacing="xs" size="sm" withPadding>
-          {FLAG_LEGEND.map(([flag, meaning]) => (
-            <List.Item key={flag}>
-              <Text span fw={700}>
-                {flag}
-              </Text>{" "}
-              – {meaning}
-            </List.Item>
-          ))}
-        </List>
-      </Card>
-
-      {editedMenu.map((category, catIndex) => (
-        <Card key={category.categoryName} shadow="sm" radius="md" p="md">
-          <Group justify="space-between" mb="sm">
-            <Title order={4}>{category.categoryName}</Title>
-            <Button size="xs" onClick={() => handleAddItem(catIndex)}>
-              + Add Item
-            </Button>
-          </Group>
-          <Table>
-            <Table.Thead>
-              <Table.Tr>
-                <Table.Th>Name</Table.Th>
-                <Table.Th>Price</Table.Th>
-                <Table.Th>Stock</Table.Th>
-                <Table.Th>Flags (e.g. NF, GF, VG)</Table.Th>
-                <Table.Th>Remove</Table.Th>
-              </Table.Tr>
-            </Table.Thead>
-            <Table.Tbody>
-              {category.items.map((item, itemIndex) => (
-                <Table.Tr key={itemIndex}>
-                  <Table.Td>
-                    <TextInput
-                      value={item.itemName}
-                      onChange={(e) => handleItemChange(catIndex, itemIndex, "itemName", e.currentTarget.value)}
-                    />
-                  </Table.Td>
-                  <Table.Td>
-                    <NumberInput
-                      value={item.price}
-                      min={0}
-                      prefix="$"
-                      decimalScale={2}
-                      fixedDecimalScale
-                      onChange={(val) => handleItemChange(catIndex, itemIndex, "price", val)}
-                    />
-                  </Table.Td>
-                  <Table.Td>
-                    <Select
-                      value={item.stock}
-                      data={STOCK_OPTIONS}
-                      onChange={(val) => handleItemChange(catIndex, itemIndex, "stock", (val ?? "none") as StockLevel)}
-                    />
-                  </Table.Td>
-                  <Table.Td>
-                    <TextInput
-                      value={item.flagsString}
-                      onChange={(e) => handleItemChange(catIndex, itemIndex, "flagsString", e.currentTarget.value)}
-                    />
-                  </Table.Td>
-                  <Table.Td>
-                    <Button color="red" size="xs" onClick={() => handleRemoveItem(catIndex, itemIndex)}>
-                      Remove
-                    </Button>
-                  </Table.Td>
-                </Table.Tr>
-              ))}
-            </Table.Tbody>
-          </Table>
         </Card>
-      ))}
+
+        {changedElsewhere && (
+          <Alert color="orange" title="The menu was changed on another device">
+            <Group justify="space-between">
+              <Text size="sm">Saving now will overwrite those changes with yours.</Text>
+              <Button size="xs" variant="outline" color="orange" onClick={discardEdits}>
+                Discard my edits and load latest
+              </Button>
+            </Group>
+          </Alert>
+        )}
+
+        <Card shadow="sm" radius="md" p="md" withBorder>
+          <Title order={4} mb="xs">
+            Flag Legend
+          </Title>
+          <List spacing="xs" size="sm" withPadding>
+            {FLAG_LEGEND.map(([flag, meaning]) => (
+              <List.Item key={flag}>
+                <Text span fw={700}>
+                  {flag}
+                </Text>{" "}
+                – {meaning}
+              </List.Item>
+            ))}
+          </List>
+        </Card>
+
+        {editedMenu.map((category, catIndex) => (
+          <Card key={category.categoryName} shadow="sm" radius="md" p="md">
+            <Group justify="space-between" mb="sm">
+              <Title order={4}>{category.categoryName}</Title>
+              <Button size="xs" onClick={() => handleAddItem(catIndex)}>
+                + Add Item
+              </Button>
+            </Group>
+            <Table.ScrollContainer minWidth={640}>
+              <Table>
+                <Table.Thead>
+                  <Table.Tr>
+                    <Table.Th>Name</Table.Th>
+                    <Table.Th>Price</Table.Th>
+                    <Table.Th>Stock</Table.Th>
+                    <Table.Th>Flags (e.g. NF, GF, VG)</Table.Th>
+                    <Table.Th>Remove</Table.Th>
+                  </Table.Tr>
+                </Table.Thead>
+                <Table.Tbody>
+                  {category.items.map((item, itemIndex) => (
+                    <Table.Tr key={itemIndex}>
+                      <Table.Td>
+                        <TextInput
+                          value={item.itemName}
+                          onChange={(e) => handleItemChange(catIndex, itemIndex, "itemName", e.currentTarget.value)}
+                        />
+                      </Table.Td>
+                      <Table.Td>
+                        <NumberInput
+                          value={item.price}
+                          min={0}
+                          prefix="$"
+                          decimalScale={2}
+                          fixedDecimalScale
+                          onChange={(val) => handleItemChange(catIndex, itemIndex, "price", val)}
+                        />
+                      </Table.Td>
+                      <Table.Td>
+                        <Select
+                          value={item.stock}
+                          data={STOCK_OPTIONS}
+                          onChange={(val) =>
+                            handleItemChange(catIndex, itemIndex, "stock", (val ?? "none") as StockLevel)
+                          }
+                        />
+                      </Table.Td>
+                      <Table.Td>
+                        <TextInput
+                          value={item.flagsString}
+                          onChange={(e) => handleItemChange(catIndex, itemIndex, "flagsString", e.currentTarget.value)}
+                        />
+                      </Table.Td>
+                      <Table.Td>
+                        <Button color="red" size="xs" onClick={() => handleRemoveItem(catIndex, itemIndex)}>
+                          Remove
+                        </Button>
+                      </Table.Td>
+                    </Table.Tr>
+                  ))}
+                </Table.Tbody>
+              </Table>
+            </Table.ScrollContainer>
+          </Card>
+        ))}
       </fieldset>
     </Stack>
   );

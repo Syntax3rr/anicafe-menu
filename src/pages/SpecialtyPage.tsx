@@ -2,8 +2,10 @@ import { useEffect, useState } from "react";
 import { collection, doc, getDoc, onSnapshot, orderBy, query, where, writeBatch } from "firebase/firestore";
 import { OrderCard } from "../components/OrderCard";
 import { OrderGrid } from "../components/OrderGrid";
+import { EmptyState, ErrorState, LoadingState } from "../components/StatusMessage";
 import { showUndoNotification } from "../components/undoNotification";
 import { db } from "../firebase";
+import { useNewIds } from "../hooks/useNewIds";
 import { Specialty } from "../types";
 import { isSpecialtyOnly, notifyError, notifySnapshotError, SPECIALTY_CATEGORY } from "../utils";
 
@@ -21,6 +23,8 @@ export function SpecialtyPage() {
       ),
     [],
   );
+
+  const newIds = useNewIds(specialties?.map((specialty) => specialty.id) ?? null);
 
   // A specialty doc shares its ID with its parent order, so keep both in sync. Specialty-only
   // orders never reach the Servers tab, so finishing the specialty finishes the whole order.
@@ -50,19 +54,23 @@ export function SpecialtyPage() {
     }
   };
 
-  if (loadError) return <div>Failed to load specialty orders: {loadError}</div>;
-  if (specialties === null) return <div>Loading specialty orders...</div>;
+  if (loadError) return <ErrorState title="Failed to load specialty orders" message={loadError} />;
+  if (specialties === null) return <LoadingState label="Loading specialty orders..." />;
+  if (specialties.length === 0)
+    return <EmptyState title="No open specialty orders">Orders with specialty items will appear here.</EmptyState>;
 
   return (
     <OrderGrid>
       {specialties.map((specialty) => (
         <OrderCard
           key={specialty.id}
+          isNew={newIds.has(specialty.id)}
           order={{
             id: specialty.id,
             number: specialty.number,
             completed: specialty.done,
             notes: specialty.notes,
+            timestamp: specialty.timestamp,
             totalCents: 0,
             discountCents: 0,
             categories: { [SPECIALTY_CATEGORY]: { done: false, items: specialty.items } },

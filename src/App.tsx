@@ -1,8 +1,12 @@
 import { useEffect, useState } from "react";
 import { collection, FirestoreError, onSnapshot, orderBy, query } from "firebase/firestore";
-import { Tabs } from "@mantine/core";
+import { Group, Tabs, Title } from "@mantine/core";
+import { useLocalStorage } from "@mantine/hooks";
 import { db } from "./firebase";
 import { menuCategoryFromDoc } from "./fromFirestore";
+import { ColorSchemeToggle } from "./components/ColorSchemeToggle";
+import { ErrorState, LoadingState } from "./components/StatusMessage";
+import { useWakeLock } from "./hooks/useWakeLock";
 import { MenuCategory } from "./types";
 import { AllOrdersPage } from "./pages/AllOrdersPage";
 import { CashierPage } from "./pages/CashierPage";
@@ -15,6 +19,9 @@ import "./App.css";
 function App() {
   const [menu, setMenu] = useState<MenuCategory[] | null>(null);
   const [loadError, setLoadError] = useState<FirestoreError | null>(null);
+  useWakeLock();
+  // Each device usually serves one station, so reopen the tab it was last on
+  const [tab, setTab] = useLocalStorage({ key: "anicafe-tab", defaultValue: "cashier", getInitialValueInEffect: false });
 
   useEffect(
     () =>
@@ -32,38 +39,50 @@ function App() {
     [],
   );
 
-  if (loadError) return <div>Failed to load menu: {loadError.message}</div>;
-  if (menu === null) return <div>Loading menu...</div>;
+  let content;
+  if (loadError) content = <ErrorState title="Failed to load menu" message={loadError.message} />;
+  else if (menu === null) content = <LoadingState label="Loading menu..." />;
+  else
+    content = (
+      <Tabs value={tab} onChange={(value) => value && setTab(value)} keepMounted={false}>
+        <Tabs.List>
+          <Tabs.Tab value="cashier">Cashier</Tabs.Tab>
+          <Tabs.Tab value="kitchen">Food/Drink</Tabs.Tab>
+          <Tabs.Tab value="server">Servers</Tabs.Tab>
+          <Tabs.Tab value="specialty">Specialty</Tabs.Tab>
+          <Tabs.Tab value="editMenu">Edit Menu</Tabs.Tab>
+          <Tabs.Tab value="allOrders">All Orders</Tabs.Tab>
+        </Tabs.List>
+        <Tabs.Panel value="cashier">
+          <CashierPage menu={menu} />
+        </Tabs.Panel>
+        <Tabs.Panel value="kitchen">
+          <KitchenPage />
+        </Tabs.Panel>
+        <Tabs.Panel value="server">
+          <ServerPage />
+        </Tabs.Panel>
+        <Tabs.Panel value="specialty">
+          <SpecialtyPage />
+        </Tabs.Panel>
+        {/* Kept mounted so unsaved menu edits survive a quick look at another tab */}
+        <Tabs.Panel value="editMenu" keepMounted>
+          <EditMenuPage menu={menu} />
+        </Tabs.Panel>
+        <Tabs.Panel value="allOrders">
+          <AllOrdersPage menu={menu} />
+        </Tabs.Panel>
+      </Tabs>
+    );
 
   return (
-    <Tabs defaultValue="cashier" keepMounted={false}>
-      <Tabs.List>
-        <Tabs.Tab value="cashier">Cashier</Tabs.Tab>
-        <Tabs.Tab value="kitchen">Food/Drink</Tabs.Tab>
-        <Tabs.Tab value="server">Servers</Tabs.Tab>
-        <Tabs.Tab value="specialty">Specialty</Tabs.Tab>
-        <Tabs.Tab value="editMenu">Edit Menu</Tabs.Tab>
-        <Tabs.Tab value="allOrders">All Orders</Tabs.Tab>
-      </Tabs.List>
-      <Tabs.Panel value="cashier">
-        <CashierPage menu={menu} />
-      </Tabs.Panel>
-      <Tabs.Panel value="kitchen">
-        <KitchenPage />
-      </Tabs.Panel>
-      <Tabs.Panel value="server">
-        <ServerPage />
-      </Tabs.Panel>
-      <Tabs.Panel value="specialty">
-        <SpecialtyPage />
-      </Tabs.Panel>
-      <Tabs.Panel value="editMenu">
-        <EditMenuPage menu={menu} />
-      </Tabs.Panel>
-      <Tabs.Panel value="allOrders">
-        <AllOrdersPage menu={menu} />
-      </Tabs.Panel>
-    </Tabs>
+    <>
+      <Group justify="space-between" mb="sm">
+        <Title order={3}>Anicafe</Title>
+        <ColorSchemeToggle />
+      </Group>
+      {content}
+    </>
   );
 }
 

@@ -18,6 +18,7 @@ import {
   Transition,
 } from "@mantine/core";
 import { useForm } from "@mantine/form";
+import { useMediaQuery } from "@mantine/hooks";
 import { modals } from "@mantine/modals";
 import { notifications } from "@mantine/notifications";
 import { OrderCard } from "../components/OrderCard";
@@ -35,7 +36,6 @@ import {
 } from "../utils";
 import classes from "../App.module.css";
 
-const MENU_COLUMNS = 2;
 
 /** Quantities keyed by form key (see toFormKey): category -> item -> quantity */
 type Quantities = Record<string, Record<string, number>>;
@@ -173,6 +173,8 @@ async function sendOrder(order: Order, restore: () => void) {
 }
 
 export function CashierPage({ menu }: { menu: MenuCategory[] }) {
+  // Two menu columns on laptops and iPads (portrait included), one on anything narrower
+  const columns = useMediaQuery("(min-width: 48em)", true, { getInitialValueInEffect: false }) ? 2 : 1;
   // Keyed by form path so the menu can change shape without breaking the lookups
   const handlersRef = useRef<Record<string, NumberInputHandlers | null | undefined>>({});
 
@@ -273,7 +275,7 @@ export function CashierPage({ menu }: { menu: MenuCategory[] }) {
 
   const renderCategory = (category: MenuCategory, i: number) => {
     const categoryKey = toFormKey(category.categoryName);
-    const isFirstRow = i < MENU_COLUMNS;
+    const isFirstRow = i < columns;
     return (
       <Fragment key={category.categoryName}>
         <Table.Tr style={{ display: "flex", padding: `${isFirstRow ? "0" : "12px"} 0 4px 0` }}>
@@ -323,6 +325,8 @@ export function CashierPage({ menu }: { menu: MenuCategory[] }) {
                       <>
                         <Button
                           variant="default"
+                          size="md"
+                          aria-label={`Remove one ${item.itemName}`}
                           onClick={() => handlersRef.current[formPath]?.decrement()}
                           style={styles}
                         >
@@ -332,6 +336,7 @@ export function CashierPage({ menu }: { menu: MenuCategory[] }) {
                           style={styles}
                           classNames={{ input: classes.numberButtonInput }}
                           hideControls
+                          size="md"
                           handlersRef={(el) => (handlersRef.current[formPath] = el)}
                           min={0}
                           // Sold-out items can be reduced but not increased
@@ -344,6 +349,8 @@ export function CashierPage({ menu }: { menu: MenuCategory[] }) {
                   </Transition>
                   <Button
                     variant="default"
+                    size="md"
+                    aria-label={`Add one ${item.itemName}`}
                     disabled={soldOut}
                     onClick={() => handlersRef.current[formPath]?.increment()}
                   >
@@ -359,18 +366,19 @@ export function CashierPage({ menu }: { menu: MenuCategory[] }) {
   };
 
   return (
-    <Card shadow="sm" radius="md" p="md">
+    // overflow: visible lets the total bar stick to the bottom of the screen
+    <Card shadow="sm" radius="md" p="md" style={{ overflow: "visible" }}>
       <form onSubmit={form.onSubmit(handleSubmit)}>
         <Card.Section withBorder>
           <Title order={2}>Create Order</Title>
         </Card.Section>
         <Card.Section withBorder>
           {/* Categories are dealt out left-to-right across the columns */}
-          <SimpleGrid cols={MENU_COLUMNS}>
-            {Array.from({ length: MENU_COLUMNS }, (_, column) => (
+          <SimpleGrid cols={columns}>
+            {Array.from({ length: columns }, (_, column) => (
               <Table key={column}>
                 <Table.Tbody>
-                  {menu.map((category, i) => i % MENU_COLUMNS === column && renderCategory(category, i))}
+                  {menu.map((category, i) => i % columns === column && renderCategory(category, i))}
                 </Table.Tbody>
               </Table>
             ))}
@@ -412,10 +420,19 @@ export function CashierPage({ menu }: { menu: MenuCategory[] }) {
           </Group>
         </Card.Section>
         <Card.Section className={classes.cashSubmit}>
-          {form.errors.items && <Text c="red">{form.errors.items}</Text>}
-          <Group>
-            <Text>Order Total: {formatCents(totalCents)}</Text>
-            <Button type="submit">Submit</Button>
+          <Text c="red" size="sm">
+            {form.errors.items}
+          </Text>
+          <Group gap="md" ml="auto">
+            <Text size="lg">
+              Total:{" "}
+              <Text span fw={700} size="xl">
+                {formatCents(totalCents)}
+              </Text>
+            </Text>
+            <Button type="submit" size="md">
+              Submit Order
+            </Button>
           </Group>
         </Card.Section>
       </form>

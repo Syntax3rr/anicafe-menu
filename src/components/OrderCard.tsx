@@ -1,7 +1,29 @@
 import { Fragment } from "react";
 import { Badge, Button, Card, Checkbox, Group, Table, Text, Title } from "@mantine/core";
+import { useNow } from "../hooks/useNow";
 import { Order } from "../types";
 import { byKey, zoneToColor } from "../utils";
+import classes from "./OrderCard.module.css";
+
+/** Orders waiting longer than this get their age highlighted */
+const LATE_MINUTES = 15;
+
+function formatAge(minutes: number) {
+  if (minutes < 1) return "just now";
+  if (minutes < 60) return `${minutes} min ago`;
+  return `${Math.floor(minutes / 60)} h ${minutes % 60} min ago`;
+}
+
+function OrderAge({ placedAtMs }: { placedAtMs: number }) {
+  const now = useNow();
+  const minutes = Math.max(0, Math.floor((now - placedAtMs) / 60_000));
+  const late = minutes >= LATE_MINUTES;
+  return (
+    <Text size="sm" c={late ? "orange" : "dimmed"} fw={late ? 600 : undefined}>
+      {formatAge(minutes)}
+    </Text>
+  );
+}
 
 interface OrderCardProps {
   order: Order;
@@ -9,26 +31,55 @@ interface OrderCardProps {
   completeOrder?: () => Promise<void>;
   /** "view" shows read-only checkboxes; a function makes them editable; omitted hides them */
   completeCategory?: "view" | ((orderId: string, categoryName: string, value: boolean) => Promise<void>);
+  /** Just arrived: the card pulses to catch the station's eye */
+  isNew?: boolean;
 }
 
-export function OrderCard({ order, excludeCategories = [], completeOrder, completeCategory }: OrderCardProps) {
+export function OrderCard({ order, excludeCategories = [], completeOrder, completeCategory, isNew }: OrderCardProps) {
   const categories = Object.entries(order.categories)
     .filter(([categoryName]) => !excludeCategories.includes(categoryName))
     .sort(byKey);
+  // Every category this station tracks is done, so the order is ready to go out
+  const ready = completeCategory !== undefined && categories.length > 0 && categories.every(([, c]) => c.done);
+  // Null until the server confirms the write
+  const placedAtMs = order.timestamp?.toMillis();
 
   return (
-    <Card shadow="sm" radius="md" p="md" style={{ height: "420px", display: "flex", flexDirection: "column" }}>
+    <Card
+      shadow="sm"
+      radius="md"
+      p="md"
+      withBorder
+      className={isNew ? classes.new : undefined}
+      style={{
+        height: "420px",
+        display: "flex",
+        flexDirection: "column",
+        borderColor: ready ? "var(--mantine-color-green-filled)" : undefined,
+        borderWidth: ready ? 2 : undefined,
+      }}
+    >
       <Card.Section withBorder>
-        <Group justify="space-between" h={36}>
-          <Group>
+        <Group justify="space-between" wrap="nowrap" mih={36}>
+          <Group gap="xs">
             <Title order={3}>Order #{order.number}</Title>
             {order.zone && <Badge color={zoneToColor(order.zone)}>{order.zone}</Badge>}
+            {isNew && <Badge color="blue">New</Badge>}
+            {ready && (
+              <Badge color="green" variant="light">
+                Ready
+              </Badge>
+            )}
           </Group>
           {completeOrder && <Button onClick={completeOrder}>Complete</Button>}
         </Group>
+        {placedAtMs !== undefined && <OrderAge placedAtMs={placedAtMs} />}
         {order.notes && (
-          <Text lineClamp={3} mt={8} style={{ overflowWrap: "break-word" }}>
-            Notes: {order.notes}
+          <Text lineClamp={3} mt={4} style={{ overflowWrap: "break-word" }}>
+            <Text span fw={600}>
+              Notes:
+            </Text>{" "}
+            {order.notes}
           </Text>
         )}
       </Card.Section>
