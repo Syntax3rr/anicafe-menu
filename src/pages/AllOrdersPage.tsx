@@ -34,13 +34,30 @@ interface OrderFilters {
   status: StatusFilter;
   zones: string[];
   categories: string[];
+  /** Inclusive local dates as YYYY-MM-DD, or empty for no limit. */
+  from: string;
+  to: string;
   sort: SortOrder;
 }
 
-const NO_FILTERS: OrderFilters = { search: "", status: "all", zones: [], categories: [], sort: "oldest" };
+const NO_FILTERS: OrderFilters = {
+  search: "",
+  status: "all",
+  zones: [],
+  categories: [],
+  from: "",
+  to: "",
+  sort: "oldest",
+};
 
-const isFiltered = ({ search, status, zones, categories }: OrderFilters) =>
-  search.trim() !== "" || status !== "all" || zones.length > 0 || categories.length > 0;
+const isFiltered = ({ search, status, zones, categories, from, to }: OrderFilters) =>
+  search.trim() !== "" || status !== "all" || zones.length > 0 || categories.length > 0 || from !== "" || to !== "";
+
+const toDateKey = (date: Date) =>
+  [date.getFullYear(), date.getMonth() + 1, date.getDate()].map((part) => String(part).padStart(2, "0")).join("-");
+
+/** The server timestamp is null until the write is acknowledged, so a pending order counts as placed now. */
+const placedAt = (order: Order, now: number) => order.timestamp?.toDate() ?? new Date(now);
 
 const logCategories = (orders: Order[], menu: MenuCategory[]) => {
   const menuNames = menu.map((category) => category.categoryName);
@@ -61,9 +78,19 @@ const matchesSearch = (order: Order, search: string) => {
   );
 };
 
-const filterOrders = (orders: Order[], { search, status, zones, categories, sort }: OrderFilters) => {
+const withinDates = (order: Order, from: string, to: string, now: number) => {
+  const day = toDateKey(placedAt(order, now));
+  return (from === "" || day >= from) && (to === "" || day <= to);
+};
+
+const filterOrders = (
+  orders: Order[],
+  { search, status, zones, categories, from, to, sort }: OrderFilters,
+  now: number,
+) => {
   const matching = orders.filter(
     (order) =>
+      withinDates(order, from, to, now) &&
       (status === "all" || order.completed === (status === "completed")) &&
       (zones.length === 0 || zones.includes(order.zone ?? "")) &&
       (categories.length === 0 || categories.some((name) => name in order.categories)) &&
@@ -140,7 +167,11 @@ export function AllOrdersPage({ menu }: { menu: MenuCategory[] }) {
   );
 
   const categoryOptions = useMemo(() => logCategories(orders ?? [], menu), [orders, menu]);
-  const filteredOrders = useMemo(() => filterOrders(orders ?? [], filters), [orders, filters]);
+  const filteredOrders = useMemo(() => filterOrders(orders ?? [], filters, Date.now()), [orders, filters]);
+  const spansDays = useMemo(
+    () => new Set(filteredOrders.map((order) => toDateKey(placedAt(order, Date.now())))).size > 1,
+    [filteredOrders],
+  );
   const analytics = useMemo(
     () => computeAnalytics(filteredOrders, menu, filters.categories),
     [filteredOrders, menu, filters.categories],
@@ -161,6 +192,31 @@ export function AllOrdersPage({ menu }: { menu: MenuCategory[] }) {
               onChange={(e) => setFilter("search", e.currentTarget.value)}
               style={{ flex: "1 1 220px" }}
             />
+            <TextInput
+              type="date"
+              label="From"
+              value={filters.from}
+              max={filters.to || undefined}
+              onChange={(e) => setFilter("from", e.currentTarget.value)}
+              style={{ flex: "0 1 170px" }}
+            />
+            <TextInput
+              type="date"
+              label="To"
+              value={filters.to}
+              min={filters.from || undefined}
+              onChange={(e) => setFilter("to", e.currentTarget.value)}
+              style={{ flex: "0 1 170px" }}
+            />
+            <Button
+              variant="default"
+              onClick={() => {
+                const today = toDateKey(new Date());
+                setFilters((prev) => ({ ...prev, from: today, to: today }));
+              }}
+            >
+              Today
+            </Button>
             <MultiSelect
               label="Seating zone"
               placeholder={filters.zones.length === 0 ? "All zones" : undefined}
@@ -277,7 +333,13 @@ export function AllOrdersPage({ menu }: { menu: MenuCategory[] }) {
                 <Table.Tr key={order.id}>
                   <Table.Td fw={600}>{order.number}</Table.Td>
                   <Table.Td>
-                    {order.timestamp?.toDate().toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })}
+                    {order.timestamp
+                      ?.toDate()
+                      .toLocaleString("en-US", {
+                        ...(spansDays && { month: "short", day: "numeric" }),
+                        hour: "numeric",
+                        minute: "2-digit",
+                      })}
                   </Table.Td>
                   <Table.Td ta="right">{formatCents(order.totalCents)}</Table.Td>
                   <Table.Td ta="right" c={order.discountCents === 0 ? "dimmed" : undefined}>

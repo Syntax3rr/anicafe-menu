@@ -13,7 +13,7 @@ A real-time ordering app for café events. Cashiers, kitchen staff, servers, and
 | Servers | See preparation status and mark orders as delivered. |
 | Specialty | Prepare specialty items separately; completing a specialty-only order also completes the order. |
 | Edit Menu | Unlock editing to add categories and manage items, prices, stock, and dietary flags. Saves check for concurrent changes. |
-| All Orders | View order history and sales totals, filtered by search, status, seating zone, or category. |
+| All Orders | View order history and sales totals, filtered by search, date, status, seating zone, or category. |
 
 The Cashier and Edit Menu tabs retain unfinished work when switching tabs. Each device remembers its last tab and color scheme.
 
