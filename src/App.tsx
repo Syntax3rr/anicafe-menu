@@ -20,7 +20,6 @@ function App() {
   const [menu, setMenu] = useState<MenuCategory[] | null>(null);
   const [loadError, setLoadError] = useState<FirestoreError | null>(null);
   useWakeLock();
-  // Each device usually serves one station, so reopen the tab it was last on
   const [tab, setTab] = useLocalStorage({
     key: "anicafe-tab",
     defaultValue: "cashier",
@@ -57,7 +56,6 @@ function App() {
           <Tabs.Tab value="editMenu">Edit Menu</Tabs.Tab>
           <Tabs.Tab value="allOrders">All Orders</Tabs.Tab>
         </Tabs.List>
-        {/* Kept mounted so an order in progress survives a look at another tab */}
         <Tabs.Panel value="cashier" keepMounted>
           <CashierPage menu={menu} />
         </Tabs.Panel>
@@ -70,7 +68,6 @@ function App() {
         <Tabs.Panel value="specialty">
           <SpecialtyPage />
         </Tabs.Panel>
-        {/* Kept mounted so unsaved menu edits survive a quick look at another tab */}
         <Tabs.Panel value="editMenu" keepMounted>
           <EditMenuPage menu={menu} active={tab === "editMenu"} />
         </Tabs.Panel>

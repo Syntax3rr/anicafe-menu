@@ -1,12 +1,10 @@
 import { DocumentData, QueryDocumentSnapshot } from "firebase/firestore";
 import { MenuCategory, PersistedOrder } from "./types";
 
-// Prices used to be stored as float dollars in `price` / `discount`. Documents saved that way
-// may still exist, so read either format.
+// Read legacy dollar prices as well as prices in cents.
 
 const legacyCents = (dollars: unknown) => (typeof dollars === "number" ? Math.round(dollars * 100) : 0);
 
-/** Converts legacy `price` (dollars) to `priceCents`, preferring an existing `priceCents` */
 const toCentsMenuItems = (items: DocumentData[] = []) =>
   items.map(({ price, ...item }) => ({ ...item, priceCents: item.priceCents ?? legacyCents(price) }));
 

@@ -19,7 +19,6 @@
   align-items: start;
 }
 
-/* Stays in view while scrolling a long menu, so the total and Submit are always reachable */
 .cashSubmit {
   position: sticky;
   bottom: 0;
@@ -43,7 +42,7 @@
   background-color: var(--mantine-color-dark-6);
 }
 
-/* Sized for fingers on an iPad: md buttons are 42px tall */
+/* Match the width of the touch controls. */
 .numberButtonContainer {
   width: 164px;
   display: flex;

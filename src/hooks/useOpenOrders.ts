@@ -5,7 +5,6 @@ import { orderFromDoc } from "../fromFirestore";
 import { PersistedOrder } from "../types";
 import { notifySnapshotError } from "../utils";
 
-/** Live list of incomplete orders that have something besides specialty items, oldest first */
 export function useOpenOrders() {
   const [error, setError] = useState<string | null>(null);
   const [orders, setOrders] = useState<PersistedOrder[] | null>(null);

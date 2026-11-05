@@ -17,7 +17,6 @@ const itemsToString = (items: OrderItems | undefined) =>
         .map(([itemName, { quantity }]) => `${quantity} ${itemName}`)
         .join(", ");
 
-/** Headline totals, then quantity sold per item (menu items first, in menu order) */
 function computeAnalytics(orders: Order[], menu: MenuCategory[]) {
   const soldByItem = new Map<string, number>(
     menu.flatMap((category) => category.items.map((item) => [item.itemName, 0] as const)),

@@ -32,7 +32,6 @@ const MoonIcon = () => (
   </svg>
 );
 
-/** Switches between light and dark mode; Mantine remembers the choice per device */
 export function ColorSchemeToggle() {
   const { setColorScheme } = useMantineColorScheme();
   const computed = useComputedColorScheme("dark", { getInitialValueInEffect: false });

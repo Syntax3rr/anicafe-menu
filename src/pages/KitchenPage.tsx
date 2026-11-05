@@ -7,17 +7,15 @@ import { useFlashIds } from "../hooks/useFlashIds";
 import { useOpenOrders } from "../hooks/useOpenOrders";
 import { notifyError, SPECIALTY_CATEGORY } from "../utils";
 
-/** Food/Drink station: tick off each category of an order once it's prepared */
 export function KitchenPage() {
   const { orders, error } = useOpenOrders();
-  // New orders flash for a while, or until someone here touches them
   const { flashIds: newIds, dismiss } = useFlashIds(orders?.map((order) => order.id) ?? null, {
     durationMs: 10_000,
   });
 
   const checkCategory = async (orderId: string, categoryName: string, value: boolean) => {
     try {
-      // FieldPath instead of a dotted string so category names containing dots work
+      // FieldPath preserves category names containing dots.
       await updateDoc(doc(db, "orders", orderId), new FieldPath("categories", categoryName, "done"), value);
     } catch (error) {
       notifyError(`Failed to update ${categoryName}`, error);

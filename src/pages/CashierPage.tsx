@@ -38,7 +38,7 @@ import {
 import classes from "../App.module.css";
 
 
-/** Quantities keyed by form key (see toFormKey): category -> item -> quantity */
+/** Quantities keyed by escaped category and item names. */
 type Quantities = Record<string, Record<string, number | string>>;
 
 const roundedQuantity = (value: number | string) => {
@@ -46,7 +46,7 @@ const roundedQuantity = (value: number | string) => {
   return Number.isFinite(quantity) ? Math.max(0, Math.ceil(quantity)) : 0;
 };
 
-/** Writes the order and its specialty entry (if any) atomically, sharing one ID */
+/** Write the order and specialty entry atomically under the same ID. */
 async function saveOrder(order: Order) {
   const specialty = order.categories[SPECIALTY_CATEGORY];
   const batch = writeBatch(db);
@@ -66,7 +66,6 @@ async function saveOrder(order: Order) {
   await batch.commit();
 }
 
-/** Converts form quantities to Order.categories, dropping zero quantities and empty categories */
 const emptyQuantities = (menu: MenuCategory[]): Quantities =>
   Object.fromEntries(
     menu.map((category) => [
@@ -78,8 +77,6 @@ const emptyQuantities = (menu: MenuCategory[]): Quantities =>
 const quantityOf = (quantities: Quantities, category: MenuCategory, item: MenuItem) =>
   roundedQuantity(quantities[toFormKey(category.categoryName)]?.[toFormKey(item.itemName)] ?? 0);
 
-// Calculate from the current menu; selected items no longer present are flagged separately.
-
 const calculateTotalCents = (menu: MenuCategory[], quantities: Quantities) =>
   menu.reduce(
     (sum, category) =>
@@ -87,7 +84,6 @@ const calculateTotalCents = (menu: MenuCategory[], quantities: Quantities) =>
     0,
   );
 
-/** Converts form quantities to Order.categories, dropping zero quantities and empty categories */
 function toOrderCategories(menu: MenuCategory[], quantities: Quantities): Order["categories"] {
   const categories: Order["categories"] = {};
   for (const menuCategory of menu) {
@@ -103,7 +99,6 @@ function toOrderCategories(menu: MenuCategory[], quantities: Quantities): Order[
 
 const itemsError = (menu: MenuCategory[], quantities: Quantities) => {
   if (missingItems(menu, quantities).length > 0) return "Remove unavailable items before submitting.";
-  // An item can sell out while it's already in the order, and the input still accepts typing
   const soldOut = menu.flatMap((category) =>
     category.items.filter((item) => item.stock === "none" && quantityOf(quantities, category, item) > 0),
   );
@@ -111,7 +106,6 @@ const itemsError = (menu: MenuCategory[], quantities: Quantities) => {
   return Object.keys(toOrderCategories(menu, quantities)).length > 0 ? null : "Select at least one item";
 };
 
-/** Selected items whose category or name no longer exists in the live menu. */
 const missingItems = (menu: MenuCategory[], quantities: Quantities) => {
   const available = emptyQuantities(menu);
   return Object.entries(quantities).flatMap(([categoryKey, items]) =>
@@ -124,30 +118,21 @@ const missingItems = (menu: MenuCategory[], quantities: Quantities) => {
 const discountError = (menu: MenuCategory[], values: { items: Quantities; discount: number | string }) =>
   calculateTotalCents(menu, values.items) >= toCents(values.discount) ? null : "Discount greater than order total";
 
-/**
- * Legacy specialty-only orders (from before `specialtyOnly` was stored) were never marked
- * completed, so treat them as closed once their specialty items are done
- */
+// Legacy specialty-only orders were not marked completed.
 const isEffectivelyOpen = (order: Order) =>
   !(order.specialtyOnly === undefined && isSpecialtyOnly(order.categories) && order.categories[SPECIALTY_CATEGORY].done);
 
-/** Shown after the order is handed to Firestore, until the server confirms it */
 const SLOW_SAVE_MS = 4000;
 
 const DEFAULT_VALUES = {
   number: null as number | null,
   notes: "",
-  /** Dollars, as typed; converted with toCents */
+  /** Dollars, converted to cents on submit. */
   discount: 0 as number | string,
   zone: "Undecided",
 };
 
-/**
- * Saves the order, showing its progress in a notification. Firestore queues the write and
- * retries until the server confirms it (the promise doesn't reject on a bad connection), so a
- * slow save must not be re-entered: it would arrive twice. It's held in memory only, though,
- * so the tab must stay open until it's sent.
- */
+/** Firestore retries offline writes; the in-memory queue is lost if the tab closes. */
 async function sendOrder(order: Order, restore: () => void) {
   const title = `Order #${order.number}`;
   const id = notifications.show({ loading: true, title: `Sending ${title}...`, message: "", autoClose: false, withCloseButton: false });
@@ -165,7 +150,6 @@ async function sendOrder(order: Order, restore: () => void) {
     await saveOrder(order);
     notifications.update({ id, loading: false, color: "green", title: `${title} sent`, message: "", autoClose: 3000, withCloseButton: true });
   } catch (error) {
-    // Rejected by the server (e.g. permissions), so nothing was saved
     console.error(`${title} was NOT saved`, error);
     notifications.update({
       id,
@@ -189,9 +173,7 @@ async function sendOrder(order: Order, restore: () => void) {
 }
 
 export function CashierPage({ menu }: { menu: MenuCategory[] }) {
-  // Two menu columns on laptops and iPads (portrait included), one on anything narrower
   const columns = useMediaQuery("(min-width: 48em)", true, { getInitialValueInEffect: false }) ? 2 : 1;
-  // Keyed by form path so the menu can change shape without breaking the lookups
   const handlersRef = useRef<Record<string, NumberInputHandlers | null | undefined>>({});
   const latestMenu = useRef(menu);
 
@@ -207,8 +189,7 @@ export function CashierPage({ menu }: { menu: MenuCategory[] }) {
     },
   });
 
-  // Keep the form in step with live menu edits: give new items a 0 quantity, make reset()
-  // use the current menu, and re-price the order in case prices changed
+  // Add new menu items to the form and update its reset defaults.
   useEffect(() => {
     const { items } = form.getValues();
     for (const category of menu) {
@@ -219,21 +200,18 @@ export function CashierPage({ menu }: { menu: MenuCategory[] }) {
       }
     }
     form.setInitialValues({ ...DEFAULT_VALUES, items: emptyQuantities(menu) });
-    // Only re-run when the menu changes, not on every new `form` object
+    // The form object changes on every render; only menu changes should trigger this.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [menu]);
 
   const totalCents = calculateTotalCents(menu, form.values.items) - toCents(form.values.discount);
 
-  // Recalculate visible validation errors from current values rather than synchronizing error state.
   const { items, discount } = form.values;
   const unavailableItems = missingItems(menu, items);
   const visibleItemsError = form.errors.items ? itemsError(menu, items) : null;
   const visibleDiscountError = form.errors.discount ? discountError(menu, { items, discount }) : null;
 
-  // Order numbers are recycled, so only a still-open order with the same number is a duplicate.
-  // Kept live (rather than queried on submit) so the check is instant, and this device's own
-  // unconfirmed orders show up in it straight away.
+  // Listen for open orders so pending local writes are included in duplicate checks.
   const [openOrders, setOpenOrders] = useState<Order[] | null>(null);
   const [ordersError, setOrdersError] = useState<string | null>(null);
   useEffect(
@@ -248,7 +226,7 @@ export function CashierPage({ menu }: { menu: MenuCategory[] }) {
 
   const handleSubmit = (values: typeof form.values) => {
     const order: Order = {
-      number: values.number ?? 0, // never 0 thanks to validation
+      number: values.number ?? 0,
       totalCents: calculateTotalCents(menu, values.items) - toCents(values.discount),
       discountCents: toCents(values.discount),
       notes: values.notes,
@@ -258,7 +236,7 @@ export function CashierPage({ menu }: { menu: MenuCategory[] }) {
     };
 
     const duplicate = openOrders?.find((openOrder) => openOrder.number === order.number);
-    // The timestamp is null until the server has confirmed the write
+    // The timestamp is null until the server acknowledges the write.
     const placedAt = duplicate?.timestamp?.toDate().toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
 
     modals.openConfirmModal({
@@ -291,8 +269,6 @@ export function CashierPage({ menu }: { menu: MenuCategory[] }) {
           notifyError("Menu changed", "Review the updated order and confirm it again.");
           return;
         }
-        // Clear the form right away so the next order can be taken; the save is tracked in a
-        // notification instead (see sendOrder)
         form.reset();
         void sendOrder(order, () => form.setValues(values));
       },
@@ -339,7 +315,6 @@ export function CashierPage({ menu }: { menu: MenuCategory[] }) {
               <Table.Td className={classes.cashPriceContainer}>{formatCents(item.priceCents)}</Table.Td>
               <Table.Td className={classes.numberButtonContainer}>
                 <Button.Group>
-                  {/* "-" and the count slide in once the quantity is above 0 */}
                   <Transition
                     mounted={quantityOf(form.getValues().items, category, item) !== 0}
                     keepMounted
@@ -365,7 +340,6 @@ export function CashierPage({ menu }: { menu: MenuCategory[] }) {
                           size="md"
                           handlersRef={(el) => (handlersRef.current[formPath] = el)}
                           min={0}
-                          // Sold-out items can be reduced but not increased
                           max={soldOut ? quantityOf(form.getValues().items, category, item) : 99}
                           key={form.key(formPath)}
                           {...form.getInputProps(formPath)}
@@ -396,7 +370,7 @@ export function CashierPage({ menu }: { menu: MenuCategory[] }) {
   };
 
   return (
-    // overflow: visible lets the total bar stick to the bottom of the screen
+    // Sticky positioning requires visible overflow.
     <Card shadow="sm" radius="md" p="md" style={{ overflow: "visible" }}>
       <form onSubmit={form.onSubmit(handleSubmit)}>
         <Card.Section withBorder>
@@ -414,7 +388,6 @@ export function CashierPage({ menu }: { menu: MenuCategory[] }) {
           </Alert>
         )}
         <Card.Section withBorder>
-          {/* Categories are dealt out left-to-right across the columns */}
           <SimpleGrid cols={columns}>
             {Array.from({ length: columns }, (_, column) => (
               <Table key={column}>

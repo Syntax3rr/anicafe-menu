@@ -10,12 +10,9 @@ import { isOrderReady, notifyError, SPECIALTY_CATEGORY } from "../utils";
 
 const EXCLUDED = [SPECIALTY_CATEGORY];
 
-/** Servers: see kitchen progress and mark orders delivered */
 export function ServerPage() {
   const { orders, error } = useOpenOrders();
-  // Servers act when the kitchen finishes, so flash orders as they become ready rather than as
-  // they arrive. Longer than the new-order flash, since servers are often away from the screen.
-  // An order that gets a box unticked can flash again once it's ready again.
+  // Flash when an order becomes ready, including when it becomes ready again.
   const readyIds = orders?.filter((order) => isOrderReady(order, EXCLUDED)).map((order) => order.id) ?? null;
   const notReadyIds = orders?.filter((order) => !isOrderReady(order, EXCLUDED)).map((order) => order.id) ?? [];
   const { flashIds: justReadyIds, dismiss } = useFlashIds(readyIds, { durationMs: 30_000, resetIds: notReadyIds });

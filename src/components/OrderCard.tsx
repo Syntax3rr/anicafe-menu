@@ -5,7 +5,6 @@ import { Order } from "../types";
 import { byKey, isOrderReady, zoneToColor } from "../utils";
 import classes from "./OrderCard.module.css";
 
-/** Orders waiting longer than this get their age highlighted */
 const LATE_MINUTES = 15;
 
 function formatAge(minutes: number) {
@@ -29,11 +28,9 @@ interface OrderCardProps {
   order: Order;
   excludeCategories?: string[];
   completeOrder?: () => Promise<void>;
-  /** "view" shows read-only checkboxes; a function makes them editable; omitted hides them */
+  /** "view" is read-only; omit to hide checkboxes. */
   completeCategory?: "view" | ((orderId: string, categoryName: string, value: boolean) => Promise<void>);
-  /** Pulses to catch the station's eye: blue with a "New" badge, or green for just became ready */
   flash?: "new" | "ready";
-  /** Called when someone taps, clicks or tabs into the card, e.g. to stop it flashing */
   onInteract?: () => void;
 }
 
@@ -48,9 +45,8 @@ export function OrderCard({
   const categories = Object.entries(order.categories)
     .filter(([categoryName]) => !excludeCategories.includes(categoryName))
     .sort(byKey);
-  // Every category this station tracks is done, so the order is ready to go out
   const ready = completeCategory !== undefined && isOrderReady(order, excludeCategories);
-  // Null until the server confirms the write
+  // The server timestamp is null until the write is acknowledged.
   const placedAtMs = order.timestamp?.toMillis();
 
   return (
@@ -61,8 +57,7 @@ export function OrderCard({
       withBorder
       className={flash ? classes.flash : undefined}
       data-flash={flash}
-      // Capture phase, so ticking a checkbox or pressing a button inside counts too. Click rather
-      // than pointerdown, so swiping across the card to scroll on an iPad doesn't count.
+      // Capture child interactions without treating touch scrolling as a click.
       onClickCapture={onInteract}
       onFocusCapture={onInteract}
       style={{

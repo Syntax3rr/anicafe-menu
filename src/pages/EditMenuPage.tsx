@@ -23,10 +23,7 @@ import { menuCategoryFromDoc } from "../fromFirestore";
 import { MenuCategory, MenuItem, StockLevel } from "../types";
 import { notifyError, toCents } from "../utils";
 
-/**
- * The price is kept as typed while editing (in dollars, and a string while partially typed,
- * e.g. "1.") and converted to cents on save
- */
+/** Prices remain in dollars while editing and are converted to cents on save. */
 interface EditableMenuItem extends Omit<MenuItem, "flags" | "priceCents"> {
   price: number | string;
   flags: string[];
@@ -37,7 +34,6 @@ interface EditableMenuCategory {
   items: EditableMenuItem[];
 }
 
-/** Standard flags, offered on every item. Others can be created per item and are then offered too. */
 const FLAG_MEANINGS: Record<string, string> = {
   NF: "Nut Free",
   DF: "Dairy Free",
@@ -47,7 +43,7 @@ const FLAG_MEANINGS: Record<string, string> = {
 };
 const STANDARD_FLAGS = Object.keys(FLAG_MEANINGS);
 
-/** Reuses an existing flag's spelling when one matches ignoring case, so "nf" doesn't become a second NF */
+/** Reuse existing flag spelling for case-insensitive matches. */
 const normalizeFlags = (flags: string[], known: string[]) => {
   const result: string[] = [];
   for (const raw of flags) {
@@ -78,7 +74,6 @@ const toEditable = (menu: MenuCategory[]): EditableMenuCategory[] =>
 
 const fromEditable = (items: EditableMenuItem[]): MenuItem[] =>
   items.map(({ itemName, price, stock, flags }) => ({
-    // Stray whitespace would make e.g. "Latte " a separate item in orders and analytics
     itemName: itemName.trim(),
     priceCents: toCents(price),
     stock,
@@ -87,11 +82,11 @@ const fromEditable = (items: EditableMenuItem[]): MenuItem[] =>
 
 const NEW_ITEM: EditableMenuItem = { itemName: "New Item", price: 0, stock: "high", flags: [] };
 
-/** Firestore's ordering, which the live menu arrives in (orderBy("categoryName")) */
+/** Match Firestore's categoryName ordering. */
 const byCategoryName = (a: EditableMenuCategory, b: EditableMenuCategory) =>
   a.categoryName < b.categoryName ? -1 : a.categoryName > b.categoryName ? 1 : 0;
 
-/** Categories are stored as Firestore documents named after them, so the name must be a valid ID */
+/** Category names are used as Firestore document IDs. */
 function categoryNameError(name: string, existing: EditableMenuCategory[]) {
   if (!name) return "Enter a category name";
   if (name.includes("/") || name === "." || name === ".." || /^__.*__$/.test(name))
@@ -103,21 +98,16 @@ function categoryNameError(name: string, existing: EditableMenuCategory[]) {
 
 const sameMenu = (a: EditableMenuCategory[], b: EditableMenuCategory[]) => JSON.stringify(a) === JSON.stringify(b);
 
-/**
- * @param active whether the Edit Menu tab is showing; the page stays mounted while hidden so
- *   unsaved edits survive, and uses this to lock itself again once you leave
- */
+/** The mounted editor uses `active` to lock when the tab is left. */
 export function EditMenuPage({ menu, active }: { menu: MenuCategory[]; active: boolean }) {
-  // The menu the current edits started from, so live updates don't wipe edits in progress
+  // Keep the original menu for conflict detection.
   const [baseMenu, setBaseMenu] = useState(menu);
   const [editedMenu, setEditedMenu] = useState(() => toEditable(menu));
   const [saving, setSaving] = useState(false);
-  // Read-only until deliberately unlocked, so a stray tap can't change the live menu
   const [locked, setLocked] = useState(true);
   const [newCategoryName, setNewCategoryName] = useState("");
   const [newCategoryError, setNewCategoryError] = useState<string | null>(null);
 
-  // Standard flags first, then any custom ones already used on the menu (including unsaved edits)
   const customFlags = useMemo(() => {
     const used = editedMenu.flatMap((category) => category.items.flatMap((item) => item.flags));
     return [...new Set(used)].filter((flag) => !STANDARD_FLAGS.includes(flag)).sort();
@@ -126,13 +116,12 @@ export function EditMenuPage({ menu, active }: { menu: MenuCategory[]; active: b
 
   const hasUnsavedChanges = useMemo(() => !sameMenu(editedMenu, toEditable(baseMenu)), [editedMenu, baseMenu]);
 
-  // Follow live menu updates while there's nothing to lose
   if (menu !== baseMenu && !hasUnsavedChanges) {
     setBaseMenu(menu);
     setEditedMenu(toEditable(menu));
   }
 
-  // Lock again on leaving the tab, unless that would strand unsaved edits
+  // Preserve access to unsaved edits when the tab is hidden.
   useEffect(() => {
     if (!active && !hasUnsavedChanges) setLocked(true);
   }, [active, hasUnsavedChanges]);
@@ -172,7 +161,6 @@ export function EditMenuPage({ menu, active }: { menu: MenuCategory[]; active: b
 
   const handleAddItem = (catIndex: number) => updateItems(catIndex, (items) => [...items, NEW_ITEM]);
 
-  /** Not saved yet: only exists in this device's edits */
   const isUnsavedCategory = (categoryName: string) => !baseMenu.some((c) => c.categoryName === categoryName);
 
   const handleAddCategory = () => {
@@ -180,7 +168,6 @@ export function EditMenuPage({ menu, active }: { menu: MenuCategory[]; active: b
     const error = categoryNameError(categoryName, editedMenu);
     setNewCategoryError(error);
     if (error) return;
-    // Start with one item to fill in; kept in Firestore's order so it lands where it'll be after saving
     setEditedMenu((prev) => [...prev, { categoryName, items: [NEW_ITEM] }].sort(byCategoryName));
     setNewCategoryName("");
   };
@@ -202,7 +189,7 @@ export function EditMenuPage({ menu, active }: { menu: MenuCategory[]; active: b
         return;
       }
     }
-    // Matched by name, since a new category shifts the positions of the ones after it
+    // Match by name because adding a category changes array positions.
     const changed = savedMenu.filter((category) => {
       const base = baseMenu.find((c) => c.categoryName === category.categoryName);
       return !base || !sameMenu(toEditable([category]), toEditable([base]));
@@ -263,7 +250,6 @@ export function EditMenuPage({ menu, active }: { menu: MenuCategory[]; active: b
               <Button
                 variant="default"
                 onClick={() => setLocked(true)}
-                // Locking would hide the edits behind a read-only view; save or discard them first
                 disabled={hasUnsavedChanges || saving}
                 title={hasUnsavedChanges ? "Save your changes first" : undefined}
               >
@@ -277,7 +263,6 @@ export function EditMenuPage({ menu, active }: { menu: MenuCategory[]; active: b
         </Group>
       </Card>
 
-      {/* A flex column so the cards inside keep the Stack's spacing */}
       <fieldset
         disabled={saving || locked}
         style={{
@@ -412,7 +397,6 @@ export function EditMenuPage({ menu, active }: { menu: MenuCategory[]; active: b
                               </Text>
                             )
                           }
-                          // Commas still separate flags when typing or pasting, e.g. "NF, GF"
                           splitChars={[","]}
                           acceptValueOnBlur
                           clearable

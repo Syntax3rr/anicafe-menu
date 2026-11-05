@@ -1,4 +1,3 @@
-/* Glow that pulses around a card that needs attention: blue for a new order, green for ready */
 .flash {
   --flash-color: var(--mantine-color-blue-filled);
   animation: flashPulse 1.2s ease-in-out infinite;
@@ -20,7 +19,6 @@
   }
 }
 
-/* Steady highlight instead of pulsing for people who turn off animations */
 @media (prefers-reduced-motion: reduce) {
   .flash {
     animation: none;

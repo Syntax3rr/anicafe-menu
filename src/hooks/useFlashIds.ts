@@ -1,14 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
-/**
- * IDs that joined `ids` after it first loaded, so their cards can flash. Each flashes until
- * `dismiss(id)` is called (e.g. when someone touches the card) or, if `durationMs` is set, until
- * that time is up. Anything already showing on first load is old news.
- *
- * An ID only flashes once, so e.g. an order brought back with Undo doesn't flash again. To let
- * one flash again, list it in `resetIds`: an order that was ready and then had a box unticked
- * should flash when it's ready again.
- */
+/** Flash IDs added after the initial load. `resetIds` allows an ID to flash again. */
 export function useFlashIds(
   ids: string[] | null,
   { durationMs = null as number | null, resetIds = [] as string[] } = {},
@@ -17,7 +9,7 @@ export function useFlashIds(
   const [flashIds, setFlashIds] = useState<ReadonlySet<string>>(new Set());
   const key = ids?.join(",");
   const resetKey = resetIds.join(",");
-  // Each flash gets its own timer, which must survive later flashes, so only unmount clears them
+  // Flash timers must survive subsequent updates.
   const timers = useRef<ReturnType<typeof setTimeout>[]>([]);
   useEffect(() => () => timers.current.forEach(clearTimeout), []);
 
@@ -37,7 +29,7 @@ export function useFlashIds(
         setTimeout(() => setFlashIds((prev) => new Set([...prev].filter((id) => !fresh.includes(id)))), durationMs),
       );
     }
-    // `key` and `resetKey` capture the contents of the arrays
+    // Depend on array contents rather than array identities.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [key, resetKey, durationMs]);
 

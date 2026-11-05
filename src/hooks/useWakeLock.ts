@@ -1,10 +1,6 @@
 import { useEffect } from "react";
 
-/**
- * Keeps the screen on while the app is visible, so station iPads and laptops don't dim or lock
- * mid-service. The browser drops the lock whenever the tab is hidden, so it's re-requested on
- * return. Browsers without the Screen Wake Lock API (iPadOS before 16.4) just skip it.
- */
+/** Reacquire the screen wake lock when the tab becomes visible. */
 export function useWakeLock() {
   useEffect(() => {
     if (!("wakeLock" in navigator)) return;
@@ -18,7 +14,6 @@ export function useWakeLock() {
         if (cancelled) void sentinel.release();
         else lock = sentinel;
       } catch (error) {
-        // e.g. low battery mode; nothing to do but let the screen sleep
         console.warn("Screen wake lock unavailable:", error);
       }
     };

@@ -9,7 +9,6 @@ import { useFlashIds } from "../hooks/useFlashIds";
 import { Specialty } from "../types";
 import { isSpecialtyOnly, notifyError, notifySnapshotError, SPECIALTY_CATEGORY } from "../utils";
 
-/** Specialty station: handles the Specialty category separately from the kitchen */
 export function SpecialtyPage() {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [specialties, setSpecialties] = useState<Specialty[] | null>(null);
@@ -31,10 +30,9 @@ export function SpecialtyPage() {
     durationMs: 10_000,
   });
 
-  // A specialty doc shares its ID with its parent order, so keep both in sync. Specialty-only
-  // orders never reach the Servers tab, so finishing the specialty finishes the whole order.
+  // Specialty-only orders bypass the server station and must be completed here.
   const setDone = async ({ id, specialtyOnly }: Specialty, done: boolean) => {
-    // Specialty docs created before the field existed don't say, so check the order itself
+    // Older specialty documents do not have this field.
     if (specialtyOnly === undefined) {
       const order = await getDoc(doc(db, "orders", id));
       specialtyOnly = order.exists() && isSpecialtyOnly(order.data().categories ?? {});
