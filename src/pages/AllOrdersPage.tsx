@@ -1,13 +1,78 @@
 import { useEffect, useMemo, useState } from "react";
 import { collection, onSnapshot, orderBy, query } from "firebase/firestore";
-import { Badge, Paper, SimpleGrid, Stack, Table, Text, Title } from "@mantine/core";
+import {
+  Badge,
+  Button,
+  Group,
+  MultiSelect,
+  Paper,
+  SegmentedControl,
+  SimpleGrid,
+  Stack,
+  Table,
+  Text,
+  TextInput,
+  Title,
+} from "@mantine/core";
 import { EmptyState, ErrorState, LoadingState } from "../components/StatusMessage";
 import { db } from "../firebase";
 import { orderFromDoc } from "../fromFirestore";
 import { MenuCategory, Order, OrderItems } from "../types";
-import { byKey, formatCents, notifySnapshotError } from "../utils";
+import { byKey, formatCents, notifySnapshotError, ZONES, zoneToColor } from "../utils";
 
-const LOG_CATEGORIES = ["Food", "Drinks", "Specialty"];
+interface SoldItem {
+  categoryName: string;
+  itemName: string;
+  quantity: number;
+}
+
+type StatusFilter = "all" | "open" | "completed";
+type SortOrder = "oldest" | "newest";
+
+interface OrderFilters {
+  search: string;
+  status: StatusFilter;
+  zones: string[];
+  categories: string[];
+  sort: SortOrder;
+}
+
+const NO_FILTERS: OrderFilters = { search: "", status: "all", zones: [], categories: [], sort: "oldest" };
+
+const isFiltered = ({ search, status, zones, categories }: OrderFilters) =>
+  search.trim() !== "" || status !== "all" || zones.length > 0 || categories.length > 0;
+
+const logCategories = (orders: Order[], menu: MenuCategory[]) => {
+  const menuNames = menu.map((category) => category.categoryName);
+  const pastNames = [...new Set(orders.flatMap((order) => Object.keys(order.categories)))]
+    .filter((name) => !menuNames.includes(name))
+    .sort();
+  return [...menuNames, ...pastNames];
+};
+
+/** Order numbers match exactly; notes and item names match any part of the text. */
+const matchesSearch = (order: Order, search: string) => {
+  const term = search.trim().toLowerCase();
+  if (term === "") return true;
+  const itemNames = Object.values(order.categories).flatMap((category) => Object.keys(category.items));
+  return (
+    String(order.number) === term ||
+    [order.notes, ...itemNames].some((text) => text.toLowerCase().includes(term))
+  );
+};
+
+const filterOrders = (orders: Order[], { search, status, zones, categories, sort }: OrderFilters) => {
+  const matching = orders.filter(
+    (order) =>
+      (status === "all" || order.completed === (status === "completed")) &&
+      (zones.length === 0 || zones.includes(order.zone ?? "")) &&
+      (categories.length === 0 || categories.some((name) => name in order.categories)) &&
+      matchesSearch(order, search),
+  );
+  return sort === "newest" ? [...matching].reverse() : matching;
+};
+
+const soldItemKey = ({ categoryName, itemName }: SoldItem) => JSON.stringify([categoryName, itemName]);
 
 const itemsToString = (items: OrderItems | undefined) =>
   items === undefined
@@ -17,15 +82,31 @@ const itemsToString = (items: OrderItems | undefined) =>
         .map(([itemName, { quantity }]) => `${quantity} ${itemName}`)
         .join(", ");
 
-function computeAnalytics(orders: Order[], menu: MenuCategory[]) {
+/** `categories` limits the item counts and log columns; revenue always covers whole orders. */
+function computeAnalytics(orders: Order[], menu: MenuCategory[], categories: string[]) {
+  const shown = (categoryName: string) => categories.length === 0 || categories.includes(categoryName);
   const lineItems = orders.flatMap((order) =>
-    Object.values(order.categories).flatMap((category) => Object.entries(category.items)),
+    Object.entries(order.categories)
+      .filter(([categoryName]) => shown(categoryName))
+      .flatMap(([categoryName, category]) =>
+        Object.entries(category.items).map(
+          ([itemName, { quantity }]): SoldItem => ({ categoryName, itemName, quantity }),
+        ),
+      ),
   );
-  const soldByItem = lineItems.reduce(
-    (sold, [itemName, { quantity }]) => sold.set(itemName, (sold.get(itemName) ?? 0) + quantity),
-    new Map<string, number>(menu.flatMap((category) => category.items.map((item) => [item.itemName, 0] as const))),
-  );
-  const totalItems = lineItems.reduce((sum, [, { quantity }]) => sum + quantity, 0);
+  // Unsold menu items come first so they are listed with a quantity of 0.
+  const unsold = menu
+    .filter((category) => shown(category.categoryName))
+    .flatMap((category) =>
+      category.items.map(
+        (item): SoldItem => ({ categoryName: category.categoryName, itemName: item.itemName, quantity: 0 }),
+      ),
+    );
+  const soldByItem = [...unsold, ...lineItems].reduce((sold, line) => {
+    const key = soldItemKey(line);
+    return sold.set(key, { ...line, quantity: (sold.get(key)?.quantity ?? 0) + line.quantity });
+  }, new Map<string, SoldItem>());
+  const totalItems = lineItems.reduce((sum, { quantity }) => sum + quantity, 0);
   const totalRevenueCents = orders.reduce((sum, order) => sum + order.totalCents, 0);
   return {
     totals: [
@@ -33,13 +114,17 @@ function computeAnalytics(orders: Order[], menu: MenuCategory[]) {
       ["Items Sold", totalItems.toLocaleString("en-US")],
       ["Revenue", formatCents(totalRevenueCents)],
     ],
-    soldByItem: [...soldByItem],
+    soldByItem: [...soldByItem.values()],
+    categories: logCategories(orders, menu).filter(shown),
   };
 }
 
 export function AllOrdersPage({ menu }: { menu: MenuCategory[] }) {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [orders, setOrders] = useState<Order[] | null>(null);
+  const [filters, setFilters] = useState(NO_FILTERS);
+  const setFilter = <K extends keyof OrderFilters>(key: K, value: OrderFilters[K]) =>
+    setFilters((prev) => ({ ...prev, [key]: value }));
 
   useEffect(
     () =>
@@ -54,13 +139,82 @@ export function AllOrdersPage({ menu }: { menu: MenuCategory[] }) {
     [],
   );
 
-  const analytics = useMemo(() => computeAnalytics(orders ?? [], menu), [orders, menu]);
+  const categoryOptions = useMemo(() => logCategories(orders ?? [], menu), [orders, menu]);
+  const filteredOrders = useMemo(() => filterOrders(orders ?? [], filters), [orders, filters]);
+  const analytics = useMemo(
+    () => computeAnalytics(filteredOrders, menu, filters.categories),
+    [filteredOrders, menu, filters.categories],
+  );
 
   if (loadError) return <ErrorState title="Failed to load orders" message={loadError} />;
   if (orders === null) return <LoadingState label="Loading orders..." />;
 
   return (
     <Stack>
+      <Paper withBorder radius="md" p="md">
+        <Stack gap="sm">
+          <Group align="flex-end" gap="sm">
+            <TextInput
+              label="Search"
+              placeholder="Order #, notes, or item"
+              value={filters.search}
+              onChange={(e) => setFilter("search", e.currentTarget.value)}
+              style={{ flex: "1 1 220px" }}
+            />
+            <MultiSelect
+              label="Seating zone"
+              placeholder={filters.zones.length === 0 ? "All zones" : undefined}
+              data={ZONES}
+              value={filters.zones}
+              onChange={(zones) => setFilter("zones", zones)}
+              clearable
+              style={{ flex: "1 1 200px" }}
+            />
+            <MultiSelect
+              label="Category"
+              placeholder={filters.categories.length === 0 ? "All categories" : undefined}
+              data={categoryOptions}
+              value={filters.categories}
+              onChange={(categories) => setFilter("categories", categories)}
+              clearable
+              style={{ flex: "1 1 200px" }}
+            />
+          </Group>
+          <Group justify="space-between" gap="sm">
+            <Group gap="sm">
+              <SegmentedControl
+                aria-label="Order status"
+                value={filters.status}
+                onChange={(status) => setFilter("status", status as StatusFilter)}
+                data={[
+                  { value: "all", label: "All" },
+                  { value: "open", label: "Open" },
+                  { value: "completed", label: "Completed" },
+                ]}
+              />
+              <SegmentedControl
+                aria-label="Sort order"
+                value={filters.sort}
+                onChange={(sort) => setFilter("sort", sort as SortOrder)}
+                data={[
+                  { value: "oldest", label: "Oldest first" },
+                  { value: "newest", label: "Newest first" },
+                ]}
+              />
+            </Group>
+            {isFiltered(filters) && (
+              <Group gap="sm">
+                <Text size="sm" c="dimmed">
+                  Showing {filteredOrders.length} of {orders.length} orders
+                </Text>
+                <Button variant="subtle" onClick={() => setFilters({ ...NO_FILTERS, sort: filters.sort })}>
+                  Clear filters
+                </Button>
+              </Group>
+            )}
+          </Group>
+        </Stack>
+      </Paper>
       <Title order={2}>Analytics</Title>
       <SimpleGrid cols={{ base: 1, xs: 3 }}>
         {analytics.totals.map(([label, value]) => (
@@ -78,16 +232,18 @@ export function AllOrdersPage({ menu }: { menu: MenuCategory[] }) {
         <Table striped highlightOnHover withTableBorder>
           <Table.Thead>
             <Table.Tr>
+              <Table.Th>Category</Table.Th>
               <Table.Th>Item</Table.Th>
               <Table.Th ta="right">Quantity Sold</Table.Th>
             </Table.Tr>
           </Table.Thead>
           <Table.Tbody>
-            {analytics.soldByItem.map(([itemName, quantity]) => (
-              <Table.Tr key={itemName}>
-                <Table.Td>{itemName}</Table.Td>
-                <Table.Td ta="right" c={quantity === 0 ? "dimmed" : undefined}>
-                  {quantity}
+            {analytics.soldByItem.map((soldItem) => (
+              <Table.Tr key={soldItemKey(soldItem)}>
+                <Table.Td c="dimmed">{soldItem.categoryName}</Table.Td>
+                <Table.Td>{soldItem.itemName}</Table.Td>
+                <Table.Td ta="right" c={soldItem.quantity === 0 ? "dimmed" : undefined}>
+                  {soldItem.quantity}
                 </Table.Td>
               </Table.Tr>
             ))}
@@ -97,8 +253,10 @@ export function AllOrdersPage({ menu }: { menu: MenuCategory[] }) {
       <Title order={2}>All Orders</Title>
       {orders.length === 0 ? (
         <EmptyState title="No orders yet" />
+      ) : filteredOrders.length === 0 ? (
+        <EmptyState title="No matching orders">Try removing a filter.</EmptyState>
       ) : (
-        <Table.ScrollContainer minWidth={900}>
+        <Table.ScrollContainer minWidth={550 + 150 * analytics.categories.length}>
           <Table striped highlightOnHover withTableBorder>
             <Table.Thead>
               <Table.Tr>
@@ -107,14 +265,15 @@ export function AllOrdersPage({ menu }: { menu: MenuCategory[] }) {
                 <Table.Th ta="right">Price</Table.Th>
                 <Table.Th ta="right">Discount</Table.Th>
                 <Table.Th>Status</Table.Th>
+                <Table.Th>Zone</Table.Th>
                 <Table.Th>Notes</Table.Th>
-                {LOG_CATEGORIES.map((categoryName) => (
+                {analytics.categories.map((categoryName) => (
                   <Table.Th key={categoryName}>{categoryName}</Table.Th>
                 ))}
               </Table.Tr>
             </Table.Thead>
             <Table.Tbody>
-              {orders.map((order) => (
+              {filteredOrders.map((order) => (
                 <Table.Tr key={order.id}>
                   <Table.Td fw={600}>{order.number}</Table.Td>
                   <Table.Td>
@@ -129,8 +288,17 @@ export function AllOrdersPage({ menu }: { menu: MenuCategory[] }) {
                       {order.completed ? "Completed" : "Open"}
                     </Badge>
                   </Table.Td>
+                  <Table.Td>
+                    {order.zone ? (
+                      <Badge variant="light" color={zoneToColor(order.zone)}>
+                        {order.zone}
+                      </Badge>
+                    ) : (
+                      "-"
+                    )}
+                  </Table.Td>
                   <Table.Td>{order.notes}</Table.Td>
-                  {LOG_CATEGORIES.map((categoryName) => (
+                  {analytics.categories.map((categoryName) => (
                     <Table.Td key={categoryName}>{itemsToString(order.categories[categoryName]?.items)}</Table.Td>
                   ))}
                 </Table.Tr>

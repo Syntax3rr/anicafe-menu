@@ -13,7 +13,7 @@ A real-time ordering app for café events. Cashiers, kitchen staff, servers, and
 | Servers | See preparation status and mark orders as delivered. |
 | Specialty | Prepare specialty items separately; completing a specialty-only order also completes the order. |
 | Edit Menu | Unlock editing to add categories and manage items, prices, stock, and dietary flags. Saves check for concurrent changes. |
-| All Orders | View order history and sales totals. |
+| All Orders | View order history and sales totals, filtered by search, status, seating zone, or category. |
 
 The Cashier and Edit Menu tabs retain unfinished work when switching tabs. Each device remembers its last tab and color scheme.
 
@@ -63,7 +63,7 @@ Stock is `high`, `low`, or `none`. Order categories contain a `done` flag and it
 
 Prices are stored in integer cents and displayed in dollars. An order's `totalCents` is the amount after its discount. Readers also accept legacy dollar prices.
 
-The `Specialty` category routes items to the Specialty tab. The order log also has fixed columns for `Food`, `Drinks`, and `Specialty`.
+The `Specialty` category routes items to the Specialty tab. The order log has a column for each menu category, followed by any categories that appear only in past orders. Sales analytics count items per category.
 
 ### Required indexes
 
