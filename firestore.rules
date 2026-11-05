@@ -1,0 +1,32 @@
+rules_version = '2';
+
+// Two shared accounts sign in on event devices. These emails must match VITE_STAFF_EMAIL and
+// VITE_ADMIN_EMAIL in .env. They aren't secret; the account passwords are.
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function isAdmin() {
+      return request.auth != null && request.auth.token.email == "admin@anicafe.app";
+    }
+
+    function isStaff() {
+      return isAdmin() || (request.auth != null && request.auth.token.email == "staff@anicafe.app");
+    }
+
+    match /menu/{category} {
+      allow read: if isStaff();
+      allow write: if isAdmin();
+    }
+
+    match /orders/{order} {
+      allow read, create, update: if isStaff();
+      allow delete: if isAdmin();
+    }
+
+    match /specialty/{order} {
+      allow read, create, update: if isStaff();
+      allow delete: if isAdmin();
+    }
+
+    // Everything else is denied by default
+  }
+}
