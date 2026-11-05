@@ -38,6 +38,18 @@ import {
 import classes from "../App.module.css";
 
 
+const PlusIcon = () => (
+  <svg width="18" height="18" viewBox="0 0 18 18" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" aria-hidden>
+    <path d="M9 3v12M3 9h12" />
+  </svg>
+);
+
+const MinusIcon = () => (
+  <svg width="18" height="18" viewBox="0 0 18 18" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" aria-hidden>
+    <path d="M3 9h12" />
+  </svg>
+);
+
 /** Quantities keyed by escaped category and item names. */
 type Quantities = Record<string, Record<string, number | string>>;
 
@@ -288,6 +300,7 @@ export function CashierPage({ menu }: { menu: MenuCategory[] }) {
         {category.items.map((item) => {
           const formPath = `items.${categoryKey}.${toFormKey(item.itemName)}`;
           const soldOut = item.stock === "none";
+          const inOrder = quantityOf(form.getValues().items, category, item) !== 0;
           return (
             <Table.Tr key={item.itemName} className={classes.flexRow}>
               <Table.Td className={classes.flexGrow}>
@@ -316,7 +329,7 @@ export function CashierPage({ menu }: { menu: MenuCategory[] }) {
               <Table.Td className={classes.numberButtonContainer}>
                 <Button.Group>
                   <Transition
-                    mounted={quantityOf(form.getValues().items, category, item) !== 0}
+                    mounted={inOrder}
                     keepMounted
                     transition="slide-left"
                     duration={200}
@@ -327,11 +340,12 @@ export function CashierPage({ menu }: { menu: MenuCategory[] }) {
                         <Button
                           variant="default"
                           size="md"
+                          className={classes.stepButton}
                           aria-label={`Remove one ${item.itemName}`}
                           onClick={() => handlersRef.current[formPath]?.decrement()}
                           style={styles}
                         >
-                          -
+                          <MinusIcon />
                         </Button>
                         <NumberInput
                           style={styles}
@@ -354,11 +368,20 @@ export function CashierPage({ menu }: { menu: MenuCategory[] }) {
                   <Button
                     variant="default"
                     size="md"
+                    className={classes.stepButton}
+                    style={
+                      inOrder
+                        ? undefined
+                        : {
+                            borderRadius: "var(--button-radius, var(--mantine-radius-default))",
+                            borderInlineStartWidth: "var(--button-border-width)",
+                          }
+                    }
                     aria-label={`Add one ${item.itemName}`}
                     disabled={soldOut}
                     onClick={() => handlersRef.current[formPath]?.increment()}
                   >
-                    +
+                    <PlusIcon />
                   </Button>
                 </Button.Group>
               </Table.Td>

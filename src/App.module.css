@@ -44,9 +44,14 @@
 
 /* Match the width of the touch controls. */
 .numberButtonContainer {
-  width: 164px;
+  width: 136px;
   display: flex;
   justify-content: flex-end;
+}
+
+.stepButton {
+  width: 42px;
+  padding: 0;
 }
 
 .numberButtonInput {
