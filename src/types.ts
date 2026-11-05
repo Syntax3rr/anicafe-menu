@@ -35,6 +35,10 @@ export interface Order {
   categories: { [categoryName: string]: OrderCategory };
 }
 
+export interface PersistedOrder extends Order {
+  id: string;
+}
+
 export interface Specialty {
   id: string;
   number: number;

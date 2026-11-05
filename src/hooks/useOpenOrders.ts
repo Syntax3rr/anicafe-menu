@@ -2,12 +2,13 @@ import { useEffect, useState } from "react";
 import { collection, onSnapshot, orderBy, query, where } from "firebase/firestore";
 import { db } from "../firebase";
 import { orderFromDoc } from "../fromFirestore";
-import { Order } from "../types";
+import { PersistedOrder } from "../types";
 import { notifySnapshotError } from "../utils";
 
 /** Live list of incomplete orders that have something besides specialty items, oldest first */
 export function useOpenOrders() {
-  const [orders, setOrders] = useState<Order[]>([]);
+  const [error, setError] = useState<string | null>(null);
+  const [orders, setOrders] = useState<PersistedOrder[] | null>(null);
 
   useEffect(
     () =>
@@ -18,11 +19,11 @@ export function useOpenOrders() {
           where("specialtyOnly", "==", false),
           orderBy("timestamp"),
         ),
-        (snapshot) => setOrders(snapshot.docs.map(orderFromDoc)),
-        notifySnapshotError("orders"),
+        (snapshot) => { setOrders(snapshot.docs.map(orderFromDoc)); setError(null); },
+        (error) => { setError(error.message); notifySnapshotError("orders")(error); },
       ),
     [],
   );
 
-  return orders;
+  return { orders, error };
 }

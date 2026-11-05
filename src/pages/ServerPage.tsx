@@ -8,7 +8,7 @@ import { notifyError, SPECIALTY_CATEGORY } from "../utils";
 
 /** Servers: see kitchen progress and mark orders delivered */
 export function ServerPage() {
-  const orders = useOpenOrders();
+  const { orders, error } = useOpenOrders();
 
   const setCompleted = (orderId: string, completed: boolean) => updateDoc(doc(db, "orders", orderId), { completed });
 
@@ -21,6 +21,9 @@ export function ServerPage() {
     }
   };
 
+  if (error) return <div>Failed to load orders: {error}</div>;
+  if (orders === null) return <div>Loading orders...</div>;
+
   return (
     <OrderGrid>
       {orders.map((order) => (
@@ -28,8 +31,7 @@ export function ServerPage() {
           key={order.id}
           order={order}
           excludeCategories={[SPECIALTY_CATEGORY]}
-          // id is always set on orders read from Firestore
-          completeOrder={() => completeOrder(order.id!, order.number)}
+          completeOrder={() => completeOrder(order.id, order.number)}
           completeCategory="view"
         />
       ))}

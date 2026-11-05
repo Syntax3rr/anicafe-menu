@@ -7,7 +7,7 @@ import { notifyError, SPECIALTY_CATEGORY } from "../utils";
 
 /** Food/Drink station: tick off each category of an order once it's prepared */
 export function KitchenPage() {
-  const orders = useOpenOrders();
+  const { orders, error } = useOpenOrders();
 
   const checkCategory = async (orderId: string, categoryName: string, value: boolean) => {
     try {
@@ -17,6 +17,9 @@ export function KitchenPage() {
       notifyError(`Failed to update ${categoryName}`, error);
     }
   };
+
+  if (error) return <div>Failed to load orders: {error}</div>;
+  if (orders === null) return <div>Loading orders...</div>;
 
   return (
     <OrderGrid>

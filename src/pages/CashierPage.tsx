@@ -96,17 +96,16 @@ const DEFAULT_VALUES = {
 };
 
 export function CashierPage({ menu }: { menu: MenuCategory[] }) {
-  const [totalCents, setTotalCents] = useState(0);
   // Keyed by form path so the menu can change shape without breaking the lookups
   const handlersRef = useRef<Record<string, NumberInputHandlers | null | undefined>>({});
 
   const form = useForm({
-    mode: "uncontrolled",
+    mode: "controlled",
     initialValues: { ...DEFAULT_VALUES, items: emptyQuantities(menu) },
-    onValuesChange: (values) => setTotalCents(calculateTotalCents(menu, values.items) - toCents(values.discount)),
     validate: {
       number: (value: number | null) => (value && value > 0 ? null : "Order number is required"),
-      discount: () => (totalCents >= 0 ? null : "Discount greater than order total"),
+      discount: (value: number | string, values: { items: Quantities }) => (calculateTotalCents(menu, values.items) >= toCents(value) ? null : "Discount greater than order total"),
+      items: (value: Quantities) => Object.keys(toOrderCategories(menu, value)).length ? null : "Select at least one item",
     },
   });
 
@@ -122,21 +121,22 @@ export function CashierPage({ menu }: { menu: MenuCategory[] }) {
       }
     }
     form.setInitialValues({ ...DEFAULT_VALUES, items: emptyQuantities(menu) });
-    const values = form.getValues();
-    setTotalCents(calculateTotalCents(menu, values.items) - toCents(values.discount));
     // Only re-run when the menu changes, not on every new `form` object
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [menu]);
 
+  const totalCents = calculateTotalCents(menu, form.values.items) - toCents(form.values.discount);
+
   // Order numbers are recycled, so only a still-open order with the same number is a duplicate.
   // Kept live (rather than queried on submit) so the check is instant and works offline.
-  const [openOrders, setOpenOrders] = useState<Order[]>([]);
+  const [openOrders, setOpenOrders] = useState<Order[] | null>(null);
+  const [ordersError, setOrdersError] = useState<string | null>(null);
   useEffect(
     () =>
       onSnapshot(
         query(collection(db, "orders"), where("completed", "==", false)),
-        (snapshot) => setOpenOrders(snapshot.docs.map(orderFromDoc)),
-        notifySnapshotError("open orders"),
+        (snapshot) => { setOpenOrders(snapshot.docs.map(orderFromDoc)); setOrdersError(null); },
+        (error) => { setOrdersError(error.message); notifySnapshotError("open orders")(error); },
       ),
     [],
   );
@@ -144,7 +144,7 @@ export function CashierPage({ menu }: { menu: MenuCategory[] }) {
   const handleSubmit = (values: typeof form.values) => {
     const order: Order = {
       number: values.number ?? 0, // never 0 thanks to validation
-      totalCents,
+      totalCents: calculateTotalCents(menu, values.items) - toCents(values.discount),
       discountCents: toCents(values.discount),
       notes: values.notes,
       completed: false,
@@ -152,7 +152,7 @@ export function CashierPage({ menu }: { menu: MenuCategory[] }) {
       categories: toOrderCategories(menu, values.items),
     };
 
-    const duplicate = openOrders.find((openOrder) => openOrder.number === order.number);
+    const duplicate = openOrders?.find((openOrder) => openOrder.number === order.number);
     // The timestamp is null until the server has confirmed the write
     const placedAt = duplicate?.timestamp?.toDate().toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
 
@@ -160,6 +160,9 @@ export function CashierPage({ menu }: { menu: MenuCategory[] }) {
       title: "Review Order",
       children: (
         <Stack>
+          {(ordersError || openOrders === null) && (
+            <Alert color="orange" title="Duplicate check unavailable">Open orders could not be checked. Verify the order number before submitting.</Alert>
+          )}
           {duplicate && (
             <Alert color="orange" title={`Order #${order.number} is already open`}>
               It was placed {placedAt ? `at ${placedAt}` : "just now"} and hasn't been completed. Only submit if you're
@@ -324,6 +327,7 @@ export function CashierPage({ menu }: { menu: MenuCategory[] }) {
           </Group>
         </Card.Section>
         <Card.Section className={classes.cashSubmit}>
+          {form.errors.items && <Text c="red">{form.errors.items}</Text>}
           <Group>
             <Text>Order Total: {formatCents(totalCents)}</Text>
             <Button type="submit">Submit</Button>
