@@ -9,14 +9,15 @@ import { notifyError, notifySnapshotError, SPECIALTY_CATEGORY } from "../utils";
 
 /** Specialty station: handles the Specialty category separately from the kitchen */
 export function SpecialtyPage() {
-  const [specialties, setSpecialties] = useState<Specialty[]>([]);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [specialties, setSpecialties] = useState<Specialty[] | null>(null);
 
   useEffect(
     () =>
       onSnapshot(
         query(collection(db, "specialty"), where("done", "==", false), orderBy("timestamp")),
         (snapshot) => setSpecialties(snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }) as Specialty)),
-        notifySnapshotError("specialty orders"),
+        (error) => { setLoadError(error.message); notifySnapshotError("specialty orders")(error); },
       ),
     [],
   );
@@ -43,6 +44,9 @@ export function SpecialtyPage() {
       notifyError(`Failed to complete specialty order #${specialty.number}`, error);
     }
   };
+
+  if (loadError) return <div>Failed to load specialty orders: {loadError}</div>;
+  if (specialties === null) return <div>Loading specialty orders...</div>;
 
   return (
     <OrderGrid>

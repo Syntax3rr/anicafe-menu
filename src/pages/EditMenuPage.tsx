@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { doc, writeBatch } from "firebase/firestore";
+import { doc, runTransaction } from "firebase/firestore";
 import {
   Alert,
   Button,
@@ -16,6 +16,7 @@ import {
 } from "@mantine/core";
 import { modals } from "@mantine/modals";
 import { db } from "../firebase";
+import { menuCategoryFromDoc } from "../fromFirestore";
 import { MenuCategory, MenuItem, StockLevel } from "../types";
 import { notifyError, toCents } from "../utils";
 
@@ -118,11 +119,30 @@ export function EditMenuPage({ menu }: { menu: MenuCategory[] }) {
       categoryName: category.categoryName,
       items: fromEditable(category.items),
     }));
+    for (const category of savedMenu) {
+      const names = category.items.map((item) => item.itemName.trim());
+      if (names.some((name) => !name) || new Set(names).size !== names.length) {
+        notifyError("Invalid menu", `Item names in ${category.categoryName} must be nonempty and unique.`);
+        return;
+      }
+    }
+    const changed = savedMenu.filter((category, i) =>
+      !sameMenu(toEditable([category]), toEditable([baseMenu[i]])),
+    );
+    if (changed.length === 0) return;
     setSaving(true);
     try {
-      const batch = writeBatch(db);
-      for (const category of savedMenu) batch.set(doc(db, "menu", category.categoryName), category);
-      await batch.commit();
+      await runTransaction(db, async (transaction) => {
+        const snapshots = await Promise.all(changed.map((category) => transaction.get(doc(db, "menu", category.categoryName))));
+        for (let i = 0; i < changed.length; i++) {
+          const snapshot = snapshots[i];
+          const base = baseMenu.find((category) => category.categoryName === changed[i].categoryName);
+          if (!snapshot.exists() || !base || !sameMenu(toEditable([menuCategoryFromDoc(snapshot)]), toEditable([base]))) {
+            throw new Error(`${changed[i].categoryName} changed on another device. Discard your edits and try again.`);
+          }
+        }
+        for (const category of changed) transaction.set(doc(db, "menu", category.categoryName), category);
+      });
       setBaseMenu(savedMenu);
       setEditedMenu(toEditable(savedMenu));
       modals.open({ title: "Menu Saved", children: <p>Menu successfully updated!</p> });
@@ -135,6 +155,7 @@ export function EditMenuPage({ menu }: { menu: MenuCategory[] }) {
 
   return (
     <Stack>
+      <fieldset disabled={saving} style={{ border: 0, padding: 0, margin: 0 }}>
       <Card shadow="sm" radius="md" p="md">
         <Group justify="space-between">
           <Title order={2}>Edit Menu</Title>
@@ -232,6 +253,7 @@ export function EditMenuPage({ menu }: { menu: MenuCategory[] }) {
           </Table>
         </Card>
       ))}
+      </fieldset>
     </Stack>
   );
 }

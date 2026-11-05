@@ -1,5 +1,5 @@
 import { DocumentData, QueryDocumentSnapshot } from "firebase/firestore";
-import { MenuCategory, Order } from "./types";
+import { MenuCategory, PersistedOrder } from "./types";
 
 // Prices used to be stored as float dollars in `price` / `discount`. migrateLegacyPrices.ts
 // rewrites such documents in cents on app load; until it has, read either format.
@@ -21,12 +21,12 @@ export const menuCategoryFromDoc = (snapshot: QueryDocumentSnapshot<DocumentData
   return { categoryName: data.categoryName, items: toCentsMenuItems(data.items) } as MenuCategory;
 };
 
-export const orderFromDoc = (snapshot: QueryDocumentSnapshot<DocumentData>): Order => {
+export const orderFromDoc = (snapshot: QueryDocumentSnapshot<DocumentData>): PersistedOrder => {
   const { price, discount, ...data } = snapshot.data();
   return {
     ...data,
     id: snapshot.id,
     totalCents: data.totalCents ?? legacyCents(price),
     discountCents: data.discountCents ?? legacyCents(discount),
-  } as Order;
+  } as PersistedOrder;
 };

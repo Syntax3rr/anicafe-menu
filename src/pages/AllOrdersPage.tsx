@@ -41,6 +41,7 @@ function computeAnalytics(orders: Order[], menu: MenuCategory[]): [string, strin
 }
 
 export function AllOrdersPage({ menu }: { menu: MenuCategory[] }) {
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [orders, setOrders] = useState<Order[] | null>(null);
 
   useEffect(
@@ -48,13 +49,14 @@ export function AllOrdersPage({ menu }: { menu: MenuCategory[] }) {
       onSnapshot(
         query(collection(db, "orders"), orderBy("timestamp")),
         (snapshot) => setOrders(snapshot.docs.map(orderFromDoc)),
-        notifySnapshotError("orders"),
+        (error) => { setLoadError(error.message); notifySnapshotError("orders")(error); },
       ),
     [],
   );
 
   const analytics = useMemo(() => computeAnalytics(orders ?? [], menu), [orders, menu]);
 
+  if (loadError) return <div>Failed to load orders: {loadError}</div>;
   if (orders === null) return <div>Loading orders...</div>;
 
   return (

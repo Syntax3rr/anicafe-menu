@@ -12,7 +12,7 @@ The app is deployed to GitHub Pages at https://yuqiaoj.github.io/anicafe-menu/.
 | **Food/Drink** | Kitchen / bar      | Live list of open orders (excluding the Specialty category). Staff tick off each category (e.g. Food, Drinks) once it's prepared.                                                       |
 | **Servers**    | Floor staff        | The same open orders, read-only checkboxes, plus a **Complete** button once the order has been delivered. An 8-second toast offers **Undo**.                                              |
 | **Specialty**  | Specialty station  | Open items from the `Specialty` category, handled separately from the regular kitchen. Completing one also marks the Specialty category as done on the parent order.                     |
-| **Edit Menu**  | Organizers         | Edit item names, prices, stock level and dietary flags (NF, DF, GF, VG, `*` = contains pork), and add or remove items. Saves all categories in one batch.                                 |
+| **Edit Menu**  | Organizers         | Edit item names, prices, stock level and dietary flags (NF, DF, GF, VG, `*` = contains pork), and add or remove items. Saves changed categories with conflict detection.                                 |
 | **All Orders** | Organizers         | Sales analytics (total orders, items, revenue and quantity sold per item) and a full log of all orders.                                                                                |
 
 ## Tech stack
@@ -44,7 +44,7 @@ src/
 | `orders`    | auto ID              | `{ number, totalCents, discountCents, notes, zone, completed, specialtyOnly, timestamp, categories: { [category]: { done, items: { [itemName]: { quantity } } } } }` |
 | `specialty` | same ID as the order | `{ number, notes, done, specialtyOnly, timestamp, items: { [itemName]: { quantity } } }`                                                                                   |
 
-All money is stored as integer cents. `totalCents` on an order is the total **after** the discount has been subtracted. Prices are still entered and shown in dollars. Data saved in the old format (float dollars in `price` / `discount`) is converted to cents automatically when the app loads (`src/migrateLegacyPrices.ts`), and it's read correctly until then.
+All money is stored as integer cents. `totalCents` on an order is the total **after** the discount has been subtracted. Prices are still entered and shown in dollars. Data saved in the old format (float dollars in `price` / `discount`) is converted to cents when read. The migration helper in `src/migrateLegacyPrices.ts` is retained for a separately controlled migration.
 
 Order numbers are entered by the cashier and can be reused once the earlier order is completed. If the number matches an order that's still open, the review modal shows a warning, but the cashier can still submit.
 
