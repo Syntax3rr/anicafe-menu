@@ -168,7 +168,7 @@ export function EditMenuPage({ menu }: { menu: MenuCategory[] }) {
       {changedElsewhere && (
         <Alert color="orange" title="The menu was changed on another device">
           <Group justify="space-between">
-            <Text size="sm">Saving now will overwrite those changes with yours.</Text>
+            <Text size="sm">If you edited the same category, saving will be rejected. Discard your edits to load the latest menu.</Text>
             <Button size="xs" variant="outline" color="orange" onClick={discardEdits}>
               Discard my edits and load latest
             </Button>
