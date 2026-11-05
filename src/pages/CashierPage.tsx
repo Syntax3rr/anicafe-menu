@@ -27,6 +27,7 @@ import { MenuCategory, MenuItem, Order, OrderCategory } from "../types";
 import {
   formatCents,
   isSpecialtyOnly,
+  notifyError,
   notifySnapshotError,
   SPECIALTY_CATEGORY,
   toCents,
@@ -38,7 +39,12 @@ import classes from "../App.module.css";
 const MENU_COLUMNS = 2;
 
 /** Quantities keyed by form key (see toFormKey): category -> item -> quantity */
-type Quantities = Record<string, Record<string, number>>;
+type Quantities = Record<string, Record<string, number | string>>;
+
+const roundedQuantity = (value: number | string) => {
+  const quantity = Number(value);
+  return Number.isFinite(quantity) ? Math.max(0, Math.ceil(quantity)) : 0;
+};
 
 /** Writes the order and its specialty entry (if any) atomically, sharing one ID */
 async function saveOrder(order: Order) {
@@ -70,10 +76,9 @@ const emptyQuantities = (menu: MenuCategory[]): Quantities =>
   );
 
 const quantityOf = (quantities: Quantities, category: MenuCategory, item: MenuItem) =>
-  quantities[toFormKey(category.categoryName)]?.[toFormKey(item.itemName)] ?? 0;
+  roundedQuantity(quantities[toFormKey(category.categoryName)]?.[toFormKey(item.itemName)] ?? 0);
 
-// Both helpers walk the current menu rather than the form values, so items removed from
-// the menu mid-order (e.g. edited on another device) are dropped instead of priced as NaN
+// Calculate from the current menu; selected items no longer present are flagged separately.
 
 const calculateTotalCents = (menu: MenuCategory[], quantities: Quantities) =>
   menu.reduce(
@@ -97,12 +102,23 @@ function toOrderCategories(menu: MenuCategory[], quantities: Quantities): Order[
 }
 
 const itemsError = (menu: MenuCategory[], quantities: Quantities) => {
+  if (missingItems(menu, quantities).length > 0) return "Remove unavailable items before submitting.";
   // An item can sell out while it's already in the order, and the input still accepts typing
   const soldOut = menu.flatMap((category) =>
     category.items.filter((item) => item.stock === "none" && quantityOf(quantities, category, item) > 0),
   );
   if (soldOut.length > 0) return `Sold out, remove from order: ${soldOut.map((item) => item.itemName).join(", ")}`;
   return Object.keys(toOrderCategories(menu, quantities)).length > 0 ? null : "Select at least one item";
+};
+
+/** Selected items whose category or name no longer exists in the live menu. */
+const missingItems = (menu: MenuCategory[], quantities: Quantities) => {
+  const available = emptyQuantities(menu);
+  return Object.entries(quantities).flatMap(([categoryKey, items]) =>
+    Object.entries(items)
+      .filter(([itemKey, quantity]) => roundedQuantity(quantity) > 0 && available[categoryKey]?.[itemKey] === undefined)
+      .map(([itemKey, quantity]) => ({ categoryKey, itemKey, quantity: roundedQuantity(quantity) })),
+  );
 };
 
 const discountError = (menu: MenuCategory[], values: { items: Quantities; discount: number | string }) =>
@@ -175,6 +191,9 @@ async function sendOrder(order: Order, restore: () => void) {
 export function CashierPage({ menu }: { menu: MenuCategory[] }) {
   // Keyed by form path so the menu can change shape without breaking the lookups
   const handlersRef = useRef<Record<string, NumberInputHandlers | null | undefined>>({});
+  const latestMenu = useRef(menu);
+
+  useEffect(() => { latestMenu.current = menu; }, [menu]);
 
   const form = useForm({
     mode: "controlled",
@@ -204,14 +223,11 @@ export function CashierPage({ menu }: { menu: MenuCategory[] }) {
 
   const totalCents = calculateTotalCents(menu, form.values.items) - toCents(form.values.discount);
 
-  // Quantities are edited at items.<category>.<item>, and Mantine only clears the error at that
-  // exact path, so drop the order-level errors once a quantity (or menu) change resolves them
+  // Recalculate visible validation errors from current values rather than synchronizing error state.
   const { items, discount } = form.values;
-  useEffect(() => {
-    if (form.errors.items && !itemsError(menu, items)) form.clearFieldError("items");
-    if (form.errors.discount && !discountError(menu, { items, discount })) form.clearFieldError("discount");
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [menu, items]);
+  const unavailableItems = missingItems(menu, items);
+  const visibleItemsError = form.errors.items ? itemsError(menu, items) : null;
+  const visibleDiscountError = form.errors.discount ? discountError(menu, { items, discount }) : null;
 
   // Order numbers are recycled, so only a still-open order with the same number is a duplicate.
   // Kept live (rather than queried on submit) so the check is instant, and this device's own
@@ -263,6 +279,16 @@ export function CashierPage({ menu }: { menu: MenuCategory[] }) {
       labels: { confirm: duplicate ? "Submit anyway" : "Confirm", cancel: "Cancel" },
       confirmProps: duplicate && { color: "orange" },
       onConfirm: () => {
+        const currentMenu = latestMenu.current;
+        if (
+          itemsError(currentMenu, values.items) ||
+          discountError(currentMenu, values) ||
+          calculateTotalCents(currentMenu, values.items) - toCents(values.discount) !== order.totalCents ||
+          JSON.stringify(toOrderCategories(currentMenu, values.items)) !== JSON.stringify(order.categories)
+        ) {
+          notifyError("Menu changed", "Review the updated order and confirm it again.");
+          return;
+        }
         // Clear the form right away so the next order can be taken; the save is tracked in a
         // notification instead (see sendOrder)
         form.reset();
@@ -338,6 +364,10 @@ export function CashierPage({ menu }: { menu: MenuCategory[] }) {
                           max={soldOut ? quantityOf(form.getValues().items, category, item) : 99}
                           key={form.key(formPath)}
                           {...form.getInputProps(formPath)}
+                          onBlur={(event) => {
+                            form.getInputProps(formPath).onBlur(event);
+                            form.setFieldValue(formPath, roundedQuantity(form.getValues().items[categoryKey]?.[toFormKey(item.itemName)] ?? 0));
+                          }}
                         />
                       </>
                     )}
@@ -364,6 +394,17 @@ export function CashierPage({ menu }: { menu: MenuCategory[] }) {
         <Card.Section withBorder>
           <Title order={2}>Create Order</Title>
         </Card.Section>
+        {unavailableItems.length > 0 && (
+          <Alert color="orange" title="Menu items are no longer available">
+            <Text size="sm">These items were removed or renamed. Remove them and select replacements before submitting.</Text>
+            {unavailableItems.map(({ categoryKey, itemKey, quantity }) => (
+              <Group key={`${categoryKey}.${itemKey}`} justify="space-between">
+                <Text size="sm">{quantity} × {decodeURIComponent(itemKey)} ({decodeURIComponent(categoryKey)})</Text>
+                <Button size="xs" variant="outline" onClick={() => form.setFieldValue(`items.${categoryKey}.${itemKey}`, 0)}>Remove</Button>
+              </Group>
+            ))}
+          </Alert>
+        )}
         <Card.Section withBorder>
           {/* Categories are dealt out left-to-right across the columns */}
           <SimpleGrid cols={MENU_COLUMNS}>
@@ -395,6 +436,7 @@ export function CashierPage({ menu }: { menu: MenuCategory[] }) {
               thousandSeparator=","
               prefix="$"
               {...form.getInputProps("discount")}
+              error={visibleDiscountError}
             />
             <Select
               label="Seating Zone"
@@ -412,7 +454,7 @@ export function CashierPage({ menu }: { menu: MenuCategory[] }) {
           </Group>
         </Card.Section>
         <Card.Section className={classes.cashSubmit}>
-          {form.errors.items && <Text c="red">{form.errors.items}</Text>}
+          {visibleItemsError && <Text c="red">{visibleItemsError}</Text>}
           <Group>
             <Text>Order Total: {formatCents(totalCents)}</Text>
             <Button type="submit">Submit</Button>
