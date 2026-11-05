@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { doc, runTransaction } from "firebase/firestore";
 import {
   Alert,
+  Autocomplete,
   Badge,
   Button,
   Card,
@@ -21,7 +22,7 @@ import { EmptyState } from "../components/StatusMessage";
 import { db } from "../firebase";
 import { menuCategoryFromDoc } from "../fromFirestore";
 import { MenuCategory, MenuItem, StockLevel } from "../types";
-import { notifyError, toCents } from "../utils";
+import { notifyError, stationNames, toCents } from "../utils";
 
 /** Prices remain in dollars while editing and are converted to cents on save. */
 interface EditableMenuItem extends Omit<MenuItem, "flags" | "priceCents"> {
@@ -31,6 +32,7 @@ interface EditableMenuItem extends Omit<MenuItem, "flags" | "priceCents"> {
 
 interface EditableMenuCategory {
   categoryName: string;
+  station: string;
   items: EditableMenuItem[];
 }
 
@@ -62,6 +64,7 @@ const STOCK_OPTIONS = [
 const toEditable = (menu: MenuCategory[]): EditableMenuCategory[] =>
   menu.map((category) => ({
     categoryName: category.categoryName,
+    station: category.station,
     items: category.items.map(({ itemName, priceCents, stock, flags }) => ({
       itemName,
       price: priceCents / 100,
@@ -99,9 +102,15 @@ const sameMenu = (a: EditableMenuCategory[], b: EditableMenuCategory[]) => JSON.
 const sameCategory = (a: MenuCategory, b: MenuCategory) => sameMenu(toEditable([a]), toEditable([b]));
 
 const toSavedMenu = (menu: EditableMenuCategory[]): MenuCategory[] =>
-  menu.map((category) => ({ categoryName: category.categoryName, items: fromEditable(category.items) }));
+  menu.map((category) => ({
+    categoryName: category.categoryName,
+    station: category.station.trim(),
+    items: fromEditable(category.items),
+  }));
 
 function menuError(menu: MenuCategory[]) {
+  const noStation = menu.find((category) => !category.station);
+  if (noStation) return `Choose a station for ${noStation.categoryName}.`;
   const invalid = menu.find((category) => {
     const names = category.items.map((item) => item.itemName);
     return names.some((name) => !name) || new Set(names).size !== names.length;
@@ -115,6 +124,9 @@ const changedCategories = (menu: MenuCategory[], base: MenuCategory[]) =>
     const original = base.find((c) => c.categoryName === category.categoryName);
     return !original || !sameCategory(category, original);
   });
+
+const removedCategories = (menu: MenuCategory[], base: MenuCategory[]) =>
+  base.filter((original) => !menu.some((category) => category.categoryName === original.categoryName));
 
 function conflictError(categoryName: string, base: MenuCategory | undefined, current: MenuCategory | undefined) {
   if (!base) return current ? `A ${categoryName} category was added on another device.` : null;
@@ -136,6 +148,10 @@ export function EditMenuPage({ menu, active }: { menu: MenuCategory[]; active: b
     return [...new Set(used)].filter((flag) => !STANDARD_FLAGS.includes(flag)).sort();
   }, [editedMenu]);
   const flagOptions = useMemo(() => [...STANDARD_FLAGS, ...customFlags], [customFlags]);
+  const stations = useMemo(
+    () => stationNames(editedMenu.map((category) => ({ station: category.station.trim() }))).filter(Boolean),
+    [editedMenu],
+  );
 
   const hasUnsavedChanges = useMemo(() => !sameMenu(editedMenu, toEditable(baseMenu)), [editedMenu, baseMenu]);
 
@@ -184,6 +200,9 @@ export function EditMenuPage({ menu, active }: { menu: MenuCategory[]; active: b
 
   const handleAddItem = (catIndex: number) => updateItems(catIndex, (items) => [...items, NEW_ITEM]);
 
+  const handleStationChange = (catIndex: number, station: string) =>
+    setEditedMenu((prev) => prev.map((category, i) => (i === catIndex ? { ...category, station } : category)));
+
   const isUnsavedCategory = (categoryName: string) => !baseMenu.some((c) => c.categoryName === categoryName);
 
   const handleAddCategory = () => {
@@ -191,11 +210,29 @@ export function EditMenuPage({ menu, active }: { menu: MenuCategory[]; active: b
     const error = categoryNameError(categoryName, editedMenu);
     setNewCategoryError(error);
     if (error) return;
-    setEditedMenu((prev) => [...prev, { categoryName, items: [NEW_ITEM] }].sort(byCategoryName));
+    const station = stations[0] ?? "Kitchen";
+    setEditedMenu((prev) => [...prev, { categoryName, station, items: [NEW_ITEM] }].sort(byCategoryName));
     setNewCategoryName("");
   };
 
-  const handleRemoveCategory = (catIndex: number) => setEditedMenu((prev) => prev.filter((_, i) => i !== catIndex));
+  const removeCategory = (categoryName: string) =>
+    setEditedMenu((prev) => prev.filter((category) => category.categoryName !== categoryName));
+
+  const handleRemoveCategory = (categoryName: string) =>
+    isUnsavedCategory(categoryName)
+      ? removeCategory(categoryName)
+      : modals.openConfirmModal({
+          title: `Remove ${categoryName}?`,
+          children: (
+            <Text size="sm">
+              {categoryName} and its items leave the menu when you save. Past orders keep them, but open orders with
+              {" "}{categoryName} will no longer show it on the Prep tab.
+            </Text>
+          ),
+          labels: { confirm: "Remove", cancel: "Cancel" },
+          confirmProps: { color: "red" },
+          onConfirm: () => removeCategory(categoryName),
+        });
 
   const handleRemoveItem = (catIndex: number, itemIndex: number) =>
     updateItems(catIndex, (items) => items.filter((_, j) => j !== itemIndex));
@@ -207,14 +244,18 @@ export function EditMenuPage({ menu, active }: { menu: MenuCategory[]; active: b
       notifyError("Invalid menu", invalid);
       return;
     }
-    const changed = changedCategories(savedMenu, baseMenu);
-    if (changed.length === 0) return;
+    // A missing `next` deletes the category.
+    const writes = [
+      ...changedCategories(savedMenu, baseMenu).map((next) => ({ categoryName: next.categoryName, next })),
+      ...removedCategories(savedMenu, baseMenu).map(({ categoryName }) => ({ categoryName, next: undefined })),
+    ];
+    if (writes.length === 0) return;
     setSaving(true);
     try {
       await runTransaction(db, async (transaction) => {
-        const refs = changed.map((category) => doc(db, "menu", category.categoryName));
+        const refs = writes.map(({ categoryName }) => doc(db, "menu", categoryName));
         const snapshots = await Promise.all(refs.map((ref) => transaction.get(ref)));
-        const conflict = changed
+        const conflict = writes
           .map(({ categoryName }, i) =>
             conflictError(
               categoryName,
@@ -224,7 +265,7 @@ export function EditMenuPage({ menu, active }: { menu: MenuCategory[]; active: b
           )
           .find((error) => error !== null);
         if (conflict) throw new Error(`${conflict} Discard your edits and try again.`);
-        changed.forEach((category, i) => transaction.set(refs[i], category));
+        writes.forEach(({ next }, i) => (next ? transaction.set(refs[i], next) : transaction.delete(refs[i])));
       });
       setBaseMenu(savedMenu);
       setEditedMenu(toEditable(savedMenu));
@@ -324,20 +365,34 @@ export function EditMenuPage({ menu, active }: { menu: MenuCategory[]; active: b
 
         {editedMenu.length === 0 && (
           <EmptyState title="The menu is empty">
-            Add a category below (e.g. Food, Drinks, Specialty) to start.
+            Add a category below (e.g. Food, Drinks, Desserts) to start.
           </EmptyState>
         )}
 
         {editedMenu.map((category, catIndex) => (
           <Card key={category.categoryName} shadow="sm" radius="md" p="md">
-            <Group justify="space-between" mb="sm">
-              <Title order={4}>{category.categoryName}</Title>
+            <Group justify="space-between" align="flex-end" mb="sm">
+              <Group align="flex-end" gap="md">
+                <Title order={4}>{category.categoryName}</Title>
+                <Autocomplete
+                  label="Station"
+                  placeholder="Pick or type a station"
+                  data={stations}
+                  value={category.station}
+                  onChange={(station) => handleStationChange(catIndex, station)}
+                  error={category.station.trim() === "" ? "Required" : undefined}
+                  w={200}
+                />
+              </Group>
               <Group gap="xs">
-                {isUnsavedCategory(category.categoryName) && (
-                  <Button size="xs" variant="subtle" color="red" onClick={() => handleRemoveCategory(catIndex)}>
-                    Remove category
-                  </Button>
-                )}
+                <Button
+                  size="xs"
+                  variant="subtle"
+                  color="red"
+                  onClick={() => handleRemoveCategory(category.categoryName)}
+                >
+                  Remove category
+                </Button>
                 <Button size="xs" onClick={() => handleAddItem(catIndex)}>
                   + Add Item
                 </Button>
@@ -444,8 +499,8 @@ export function EditMenuPage({ menu, active }: { menu: MenuCategory[]; active: b
             </Button>
           </Group>
           <Text size="xs" c="dimmed" mt="xs">
-            New categories are saved with Save Changes. Items in a category named &quot;Specialty&quot; go to the
-            Specialty station instead of Food/Drink.
+            New categories are saved with Save Changes. The Prep tab can show one or more stations, each with the
+            categories assigned to it. Type a new name into a Station box to create a station.
           </Text>
         </Card>
       </fieldset>

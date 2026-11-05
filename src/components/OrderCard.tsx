@@ -26,7 +26,8 @@ function OrderAge({ placedAtMs }: { placedAtMs: number }) {
 
 interface OrderCardProps {
   order: Order;
-  excludeCategories?: string[];
+  /** Categories to show; omit to show all. */
+  categories?: string[];
   completeOrder?: () => Promise<void>;
   /** "view" is read-only; omit to hide checkboxes. */
   completeCategory?: "view" | ((orderId: string, categoryName: string, value: boolean) => Promise<void>);
@@ -36,16 +37,16 @@ interface OrderCardProps {
 
 export function OrderCard({
   order,
-  excludeCategories = [],
+  categories: shownCategories,
   completeOrder,
   completeCategory,
   flash,
   onInteract,
 }: OrderCardProps) {
   const categories = Object.entries(order.categories)
-    .filter(([categoryName]) => !excludeCategories.includes(categoryName))
+    .filter(([categoryName]) => !shownCategories || shownCategories.includes(categoryName))
     .sort(byKey);
-  const ready = completeCategory !== undefined && isOrderReady(order, excludeCategories);
+  const ready = completeCategory !== undefined && isOrderReady(order, shownCategories);
   // The server timestamp is null until the write is acknowledged.
   const placedAtMs = order.timestamp?.toMillis();
 

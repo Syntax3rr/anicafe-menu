@@ -1,5 +1,5 @@
-import { Fragment, useEffect, useRef, useState } from "react";
-import { collection, doc, onSnapshot, query, serverTimestamp, where, writeBatch } from "firebase/firestore";
+import { Fragment, useEffect, useRef } from "react";
+import { addDoc, collection, serverTimestamp } from "firebase/firestore";
 import {
   Alert,
   Badge,
@@ -23,20 +23,10 @@ import { modals } from "@mantine/modals";
 import { notifications } from "@mantine/notifications";
 import { OrderCard } from "../components/OrderCard";
 import { db } from "../firebase";
-import { orderFromDoc } from "../fromFirestore";
+import { useOpenOrders } from "../hooks/useOpenOrders";
 import { MenuCategory, MenuItem, Order, OrderCategory } from "../types";
-import {
-  formatCents,
-  isSpecialtyOnly,
-  notifyError,
-  notifySnapshotError,
-  SPECIALTY_CATEGORY,
-  toCents,
-  toFormKey,
-  ZONES,
-} from "../utils";
+import { formatCents, isSpecialtyOnly, notifyError, toCents, toFormKey, ZONES } from "../utils";
 import classes from "../App.module.css";
-
 
 const PlusIcon = () => (
   <svg width="18" height="18" viewBox="0 0 18 18" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" aria-hidden>
@@ -58,31 +48,13 @@ const roundedQuantity = (value: number | string) => {
   return Number.isFinite(quantity) ? Math.max(0, Math.ceil(quantity)) : 0;
 };
 
-function toOrderDocuments(order: Order) {
-  const specialty = order.categories[SPECIALTY_CATEGORY];
-  const specialtyOnly = isSpecialtyOnly(order.categories);
-  return {
-    orderDoc: { ...order, timestamp: serverTimestamp(), specialtyOnly },
-    specialtyDoc: specialty && {
-      number: order.number,
-      notes: order.notes,
-      done: false,
-      specialtyOnly,
-      timestamp: serverTimestamp(),
-      items: specialty.items,
-    },
-  };
-}
-
-/** Write the order and specialty entry atomically under the same ID. */
-async function saveOrder(order: Order) {
-  const { orderDoc, specialtyDoc } = toOrderDocuments(order);
-  const batch = writeBatch(db);
-  const orderRef = doc(collection(db, "orders"));
-  batch.set(orderRef, orderDoc);
-  if (specialtyDoc) batch.set(doc(db, "specialty", orderRef.id), specialtyDoc);
-  await batch.commit();
-}
+// `specialtyOnly` distinguishes new orders from legacy ones in useOpenOrders.
+const saveOrder = (order: Order) =>
+  addDoc(collection(db, "orders"), {
+    ...order,
+    timestamp: serverTimestamp(),
+    specialtyOnly: isSpecialtyOnly(order.categories),
+  });
 
 const emptyQuantities = (menu: MenuCategory[]): Quantities =>
   Object.fromEntries(
@@ -135,10 +107,6 @@ const missingItems = (menu: MenuCategory[], quantities: Quantities) => {
 
 const discountError = (menu: MenuCategory[], values: { items: Quantities; discount: number | string }) =>
   calculateTotalCents(menu, values.items) >= toCents(values.discount) ? null : "Discount greater than order total";
-
-// Legacy specialty-only orders were not marked completed.
-const isEffectivelyOpen = (order: Order) =>
-  !(order.specialtyOnly === undefined && isSpecialtyOnly(order.categories) && order.categories[SPECIALTY_CATEGORY].done);
 
 const SLOW_SAVE_MS = 4000;
 
@@ -230,17 +198,7 @@ export function CashierPage({ menu }: { menu: MenuCategory[] }) {
   const visibleDiscountError = form.errors.discount ? discountError(menu, { items, discount }) : null;
 
   // Listen for open orders so pending local writes are included in duplicate checks.
-  const [openOrders, setOpenOrders] = useState<Order[] | null>(null);
-  const [ordersError, setOrdersError] = useState<string | null>(null);
-  useEffect(
-    () =>
-      onSnapshot(
-        query(collection(db, "orders"), where("completed", "==", false)),
-        (snapshot) => { setOpenOrders(snapshot.docs.map(orderFromDoc).filter(isEffectivelyOpen)); setOrdersError(null); },
-        (error) => { setOrdersError(error.message); notifySnapshotError("open orders")(error); },
-      ),
-    [],
-  );
+  const { orders: openOrders, error: ordersError } = useOpenOrders();
 
   const handleSubmit = (values: typeof form.values) => {
     const order: Order = {

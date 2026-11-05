@@ -6,15 +6,13 @@ import { showUndoNotification } from "../components/undoNotification";
 import { db } from "../firebase";
 import { useFlashIds } from "../hooks/useFlashIds";
 import { useOpenOrders } from "../hooks/useOpenOrders";
-import { isOrderReady, notifyError, SPECIALTY_CATEGORY } from "../utils";
-
-const EXCLUDED = [SPECIALTY_CATEGORY];
+import { isOrderReady, notifyError } from "../utils";
 
 export function ServerPage() {
   const { orders, error } = useOpenOrders();
   // Flash when an order becomes ready, including when it becomes ready again.
-  const readyIds = orders?.filter((order) => isOrderReady(order, EXCLUDED)).map((order) => order.id) ?? null;
-  const notReadyIds = orders?.filter((order) => !isOrderReady(order, EXCLUDED)).map((order) => order.id) ?? [];
+  const readyIds = orders?.filter((order) => isOrderReady(order)).map((order) => order.id) ?? null;
+  const notReadyIds = orders?.filter((order) => !isOrderReady(order)).map((order) => order.id) ?? [];
   const { flashIds: justReadyIds, dismiss } = useFlashIds(readyIds, { durationMs: 30_000, resetIds: notReadyIds });
 
   const setCompleted = (orderId: string, completed: boolean) => updateDoc(doc(db, "orders", orderId), { completed });
@@ -41,7 +39,6 @@ export function ServerPage() {
           flash={justReadyIds.has(order.id) ? "ready" : undefined}
           onInteract={() => dismiss(order.id)}
           order={order}
-          excludeCategories={EXCLUDED}
           completeOrder={() => completeOrder(order.id, order.number)}
           completeCategory="view"
         />

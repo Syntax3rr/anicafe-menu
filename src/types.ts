@@ -11,6 +11,7 @@ export interface MenuItem {
 
 export interface MenuCategory {
   categoryName: string;
+  station: string;
   items: MenuItem[];
 }
 
@@ -24,6 +25,7 @@ export interface OrderCategory {
 export interface Order {
   id?: string;
   timestamp?: Timestamp;
+  /** Missing on orders saved before this field was added. */
   specialtyOnly?: boolean;
   zone?: string;
   number: number;
@@ -37,15 +39,4 @@ export interface Order {
 
 export interface PersistedOrder extends Order {
   id: string;
-}
-
-export interface Specialty {
-  id: string;
-  number: number;
-  notes: string;
-  done: boolean;
-  /** Missing on specialty docs created before this field was added */
-  specialtyOnly?: boolean;
-  timestamp: Timestamp;
-  items: OrderItems;
 }

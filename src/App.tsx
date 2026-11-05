@@ -11,10 +11,12 @@ import { MenuCategory } from "./types";
 import { AllOrdersPage } from "./pages/AllOrdersPage";
 import { CashierPage } from "./pages/CashierPage";
 import { EditMenuPage } from "./pages/EditMenuPage";
-import { KitchenPage } from "./pages/KitchenPage";
 import { ServerPage } from "./pages/ServerPage";
-import { SpecialtyPage } from "./pages/SpecialtyPage";
+import { PrepPage } from "./pages/PrepPage";
 import "./App.css";
+
+const TABS = ["cashier", "prep", "server", "editMenu", "allOrders"];
+const LEGACY_TABS: Record<string, string> = { kitchen: "prep", specialty: "prep" };
 
 function App() {
   const [menu, setMenu] = useState<MenuCategory[] | null>(null);
@@ -42,34 +44,32 @@ function App() {
     [],
   );
 
+  const activeTab = TABS.includes(tab) ? tab : (LEGACY_TABS[tab] ?? "cashier");
+
   let content;
   if (loadError) content = <ErrorState title="Failed to load menu" message={loadError.message} />;
   else if (menu === null) content = <LoadingState label="Loading menu..." />;
   else
     content = (
-      <Tabs value={tab} onChange={(value) => value && setTab(value)} keepMounted={false}>
+      <Tabs value={activeTab} onChange={(value) => value && setTab(value)} keepMounted={false}>
         <Tabs.List>
           <Tabs.Tab value="cashier">Cashier</Tabs.Tab>
-          <Tabs.Tab value="kitchen">Food/Drink</Tabs.Tab>
+          <Tabs.Tab value="prep">Prep</Tabs.Tab>
           <Tabs.Tab value="server">Servers</Tabs.Tab>
-          <Tabs.Tab value="specialty">Specialty</Tabs.Tab>
           <Tabs.Tab value="editMenu">Edit Menu</Tabs.Tab>
           <Tabs.Tab value="allOrders">All Orders</Tabs.Tab>
         </Tabs.List>
         <Tabs.Panel value="cashier" keepMounted>
           <CashierPage menu={menu} />
         </Tabs.Panel>
-        <Tabs.Panel value="kitchen">
-          <KitchenPage />
+        <Tabs.Panel value="prep">
+          <PrepPage menu={menu} />
         </Tabs.Panel>
         <Tabs.Panel value="server">
           <ServerPage />
         </Tabs.Panel>
-        <Tabs.Panel value="specialty">
-          <SpecialtyPage />
-        </Tabs.Panel>
         <Tabs.Panel value="editMenu" keepMounted>
-          <EditMenuPage menu={menu} active={tab === "editMenu"} />
+          <EditMenuPage menu={menu} active={activeTab === "editMenu"} />
         </Tabs.Panel>
         <Tabs.Panel value="allOrders">
           <AllOrdersPage menu={menu} />

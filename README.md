@@ -9,13 +9,12 @@ A real-time ordering app for café events. Cashiers, kitchen staff, servers, and
 | Tab | Purpose |
 | --- | --- |
 | Cashier | Create orders, apply discounts, and assign seating zones. Open order numbers trigger a warning. |
-| Food/Drink | Track open orders and mark categories as prepared. |
-| Servers | See preparation status and mark orders as delivered. |
-| Specialty | Prepare specialty items separately; completing a specialty-only order also completes the order. |
-| Edit Menu | Unlock editing to add categories and manage items, prices, stock, and dietary flags. Saves check for concurrent changes. |
+| Prep | Pick one or more stations, or All, to track their open orders and mark categories as prepared. |
+| Servers | See every category's preparation status and mark orders as delivered. |
+| Edit Menu | Unlock editing to add or remove categories, assign them to stations, and manage items, prices, stock, and dietary flags. Saves check for concurrent changes. |
 | All Orders | View order history and sales totals, filtered by search, date, status, seating zone, or category. |
 
-The Cashier and Edit Menu tabs retain unfinished work when switching tabs. Each device remembers its last tab and color scheme.
+The Cashier and Edit Menu tabs retain unfinished work when switching tabs. Each device remembers its last tab, Prep stations, and color scheme.
 
 ## Setup
 
@@ -37,13 +36,14 @@ The Cashier and Edit Menu tabs retain unfinished work when switching tabs. Each 
    ```json
    {
      "categoryName": "Drinks",
+     "station": "Bar",
      "items": [
        { "itemName": "Tea", "priceCents": 350, "stock": "high", "flags": [] }
      ]
    }
    ```
 
-4. Create the Firestore indexes listed below and configure security rules for the event. The app has no authentication, so its access depends on those rules.
+4. Configure Firestore security rules for the event. The app has no authentication, so its access depends on those rules.
 5. Install dependencies and start the development server:
 
    ```sh
@@ -55,22 +55,18 @@ The Cashier and Edit Menu tabs retain unfinished work when switching tabs. Each 
 
 | Collection | Document ID | Fields |
 | --- | --- | --- |
-| `menu` | Category name | `categoryName`, `items` (`itemName`, `priceCents`, `stock`, optional `flags`) |
+| `menu` | Category name | `categoryName`, `station`, `items` (`itemName`, `priceCents`, `stock`, optional `flags`) |
 | `orders` | Auto-generated | `number`, `totalCents`, `discountCents`, `notes`, `zone`, `completed`, `specialtyOnly`, `timestamp`, `categories` |
-| `specialty` | Parent order ID | `number`, `notes`, `done`, `specialtyOnly`, `timestamp`, `items` |
 
-Stock is `high`, `low`, or `none`. Order categories contain a `done` flag and items keyed by name, each with a `quantity`. Specialty items use the same item structure.
+Stock is `high`, `low`, or `none`. Order categories contain a `done` flag and items keyed by name, each with a `quantity`.
+
+Each category's `station` names the station that prepares it, and stations are created by naming them. Categories saved before stations existed default to a `Specialty` station for the `Specialty` category and `Food/Drink` for the rest. The Prep tab follows the current menu, so reassigning a category moves its open orders. `specialtyOnly` is kept only to recognize old specialty-only orders. The `specialty` collection used by earlier versions is no longer read and can be deleted.
 
 Prices are stored in integer cents and displayed in dollars. An order's `totalCents` is the amount after its discount. Readers also accept legacy dollar prices.
 
-The `Specialty` category routes items to the Specialty tab. The order log has a column for each menu category, followed by any categories that appear only in past orders. Sales analytics count items per category.
+The order log has a column for each menu category, followed by any categories that appear only in past orders. Sales analytics count items per category.
 
-### Required indexes
-
-- `orders`: `completed` ASC, `specialtyOnly` ASC, `timestamp` ASC
-- `specialty`: `done` ASC, `timestamp` ASC
-
-If an index is missing, the Firestore error includes a link to create it.
+No composite indexes are required.
 
 ## Development
 
