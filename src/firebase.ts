@@ -1,4 +1,5 @@
 import { initializeApp } from "firebase/app";
+import { getAuth } from "firebase/auth";
 import { getFirestore } from "firebase/firestore";
 
 const firebaseConfig = {
@@ -11,4 +12,15 @@ const firebaseConfig = {
   measurementId: import.meta.env.VITE_MEASUREMENT_ID,
 };
 
-export const db = getFirestore(initializeApp(firebaseConfig));
+const app = initializeApp(firebaseConfig);
+
+export const db = getFirestore(app);
+// Default persistence keeps each device signed in across reloads
+export const auth = getAuth(app);
+
+/**
+ * Feature flag for sign-in. Off by default so the app keeps working against a database
+ * whose rules haven't been updated yet. Turn it on together with deploying firestore.rules:
+ * with the flag off, those rules would block every request.
+ */
+export const AUTH_ENABLED = import.meta.env.VITE_AUTH_ENABLED === "true";
