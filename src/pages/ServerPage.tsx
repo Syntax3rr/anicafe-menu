@@ -6,9 +6,10 @@ import { showUndoNotification } from "../components/undoNotification";
 import { db } from "../firebase";
 import { useFlashIds } from "../hooks/useFlashIds";
 import { useOpenOrders } from "../hooks/useOpenOrders";
+import { MenuCategory } from "../types";
 import { isOrderReady, notifyError } from "../utils";
 
-export function ServerPage() {
+export function ServerPage({ menu }: { menu: MenuCategory[] }) {
   const { orders, error } = useOpenOrders();
   // Flash when an order becomes ready, including when it becomes ready again.
   const readyIds = orders?.filter((order) => isOrderReady(order)).map((order) => order.id) ?? null;
@@ -39,6 +40,7 @@ export function ServerPage() {
           flash={justReadyIds.has(order.id) ? "ready" : undefined}
           onInteract={() => dismiss(order.id)}
           order={order}
+          menu={menu}
           completeOrder={() => completeOrder(order.id, order.number)}
           completeCategory="view"
         />

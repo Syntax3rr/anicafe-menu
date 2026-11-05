@@ -10,7 +10,11 @@ const toCentsMenuItems = (items: DocumentData[] = []) =>
 
 export const menuCategoryFromDoc = (snapshot: QueryDocumentSnapshot<DocumentData>): MenuCategory => {
   const data = snapshot.data();
-  return { categoryName: data.categoryName, items: toCentsMenuItems(data.items) } as MenuCategory;
+  return {
+    categoryName: data.categoryName,
+    ...(typeof data.position === "number" && { position: data.position }),
+    items: toCentsMenuItems(data.items),
+  } as MenuCategory;
 };
 
 export const orderFromDoc = (snapshot: QueryDocumentSnapshot<DocumentData>): PersistedOrder => {

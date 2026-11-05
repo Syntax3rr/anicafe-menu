@@ -53,6 +53,7 @@ export function PrepPage({ menu }: { menu: MenuCategory[] }) {
             onInteract={() => dismiss(order.id)}
             order={order}
             categories={categories}
+            menu={menu}
             completeCategory={checkCategory}
           />
         ))}

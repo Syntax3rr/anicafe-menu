@@ -1,8 +1,8 @@
 import { Fragment } from "react";
 import { Badge, Button, Card, Checkbox, Group, Table, Text, Title } from "@mantine/core";
 import { useNow } from "../hooks/useNow";
-import { Order } from "../types";
-import { byKey, isOrderReady, zoneToColor } from "../utils";
+import { MenuCategory, Order } from "../types";
+import { byKeyOrder, isOrderReady, menuItemNames, zoneToColor } from "../utils";
 import classes from "./OrderCard.module.css";
 
 const LATE_MINUTES = 15;
@@ -28,6 +28,8 @@ interface OrderCardProps {
   order: Order;
   /** Omit to show all. */
   categories?: string[];
+  /** Sets the order of categories and items; ones no longer on the menu go last. */
+  menu: MenuCategory[];
   completeOrder?: () => Promise<void>;
   /** "view" is read-only; omit to hide checkboxes. */
   completeCategory?: "view" | ((orderId: string, categoryName: string, value: boolean) => Promise<void>);
@@ -38,6 +40,7 @@ interface OrderCardProps {
 export function OrderCard({
   order,
   categories: shownCategories,
+  menu,
   completeOrder,
   completeCategory,
   flash,
@@ -45,7 +48,7 @@ export function OrderCard({
 }: OrderCardProps) {
   const categories = Object.entries(order.categories)
     .filter(([categoryName]) => !shownCategories || shownCategories.includes(categoryName))
-    .sort(byKey);
+    .sort(byKeyOrder(menu.map((category) => category.categoryName)));
   const ready = completeCategory !== undefined && isOrderReady(order, shownCategories);
   // The server timestamp is null until the write is acknowledged.
   const placedAtMs = order.timestamp?.toMillis();
@@ -116,7 +119,7 @@ export function OrderCard({
                   )}
                 </Table.Tr>
                 {Object.entries(category.items)
-                  .sort(byKey)
+                  .sort(byKeyOrder(menuItemNames(menu, categoryName)))
                   .map(([itemName, item]) => (
                     <Table.Tr key={itemName}>
                       <Table.Td>{itemName}</Table.Td>

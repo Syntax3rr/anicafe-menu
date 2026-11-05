@@ -15,6 +15,10 @@ import { ServerPage } from "./pages/ServerPage";
 import { PrepPage } from "./pages/PrepPage";
 import "./App.css";
 
+/** Categories saved before ordering was added have no position, so they go last. */
+const byPosition = (a: MenuCategory, b: MenuCategory) =>
+  (a.position ?? Number.MAX_SAFE_INTEGER) - (b.position ?? Number.MAX_SAFE_INTEGER);
+
 const TABS = ["cashier", "prep", "server", "editMenu", "allOrders"];
 const LEGACY_TABS: Record<string, string> = { kitchen: "prep", specialty: "prep" };
 
@@ -33,7 +37,8 @@ function App() {
       onSnapshot(
         query(collection(db, "menu"), orderBy("categoryName")),
         (snapshot) => {
-          setMenu(snapshot.docs.map(menuCategoryFromDoc));
+          // The query's name order breaks ties because sort is stable.
+          setMenu(snapshot.docs.map(menuCategoryFromDoc).sort(byPosition));
           setLoadError(null);
         },
         (error) => {
@@ -66,7 +71,7 @@ function App() {
           <PrepPage menu={menu} />
         </Tabs.Panel>
         <Tabs.Panel value="server">
-          <ServerPage />
+          <ServerPage menu={menu} />
         </Tabs.Panel>
         <Tabs.Panel value="editMenu" keepMounted>
           <EditMenuPage menu={menu} active={activeTab === "editMenu"} />

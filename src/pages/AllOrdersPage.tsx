@@ -18,7 +18,7 @@ import { EmptyState, ErrorState, LoadingState } from "../components/StatusMessag
 import { db } from "../firebase";
 import { orderFromDoc } from "../fromFirestore";
 import { MenuCategory, Order, OrderItems } from "../types";
-import { byKey, formatCents, notifySnapshotError, ZONES, zoneToColor } from "../utils";
+import { byKeyOrder, formatCents, menuItemNames, notifySnapshotError, ZONES, zoneToColor } from "../utils";
 
 interface SoldItem {
   categoryName: string;
@@ -101,11 +101,11 @@ const filterOrders = (
 
 const soldItemKey = ({ categoryName, itemName }: SoldItem) => JSON.stringify([categoryName, itemName]);
 
-const itemsToString = (items: OrderItems | undefined) =>
+const itemsToString = (items: OrderItems | undefined, menuOrder: string[]) =>
   items === undefined
     ? "-"
     : Object.entries(items)
-        .sort(byKey)
+        .sort(byKeyOrder(menuOrder))
         .map(([itemName, { quantity }]) => `${quantity} ${itemName}`)
         .join(", ");
 
@@ -361,7 +361,9 @@ export function AllOrdersPage({ menu }: { menu: MenuCategory[] }) {
                   </Table.Td>
                   <Table.Td>{order.notes}</Table.Td>
                   {analytics.categories.map((categoryName) => (
-                    <Table.Td key={categoryName}>{itemsToString(order.categories[categoryName]?.items)}</Table.Td>
+                    <Table.Td key={categoryName}>
+                      {itemsToString(order.categories[categoryName]?.items, menuItemNames(menu, categoryName))}
+                    </Table.Td>
                   ))}
                 </Table.Tr>
               ))}

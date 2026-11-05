@@ -1,5 +1,6 @@
 import { FirestoreError } from "firebase/firestore";
 import { notifications } from "@mantine/notifications";
+import { MenuCategory } from "./types";
 
 export const isSpecialtyOnly = (categories: Record<string, unknown>) => {
   const names = Object.keys(categories);
@@ -33,7 +34,23 @@ export const toCents = (dollars: number | string) => {
   return Number.isFinite(value) ? Math.round(value * 100) : 0;
 };
 
-export const byKey = <T>([a]: [string, T], [b]: [string, T]) => a.localeCompare(b);
+/** Sort names by their place in `order`; names not in it go last, alphabetically. */
+export const byOrder = (order: string[]) => {
+  const rank = (name: string) => {
+    const index = order.indexOf(name);
+    return index === -1 ? order.length : index;
+  };
+  return (a: string, b: string) => rank(a) - rank(b) || a.localeCompare(b);
+};
+
+/** Sort [name, value] entries with `byOrder`. */
+export const byKeyOrder = (order: string[]) => {
+  const compare = byOrder(order);
+  return <T>([a]: [string, T], [b]: [string, T]) => compare(a, b);
+};
+
+export const menuItemNames = (menu: MenuCategory[], categoryName: string) =>
+  menu.find((category) => category.categoryName === categoryName)?.items.map((item) => item.itemName) ?? [];
 
 // Escape dots and percent signs in names used in Mantine form paths.
 export const toFormKey = (name: string) => name.replace(/%/g, "%25").replace(/\./g, "%2E");

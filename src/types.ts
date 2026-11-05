@@ -11,6 +11,8 @@ export interface MenuItem {
 
 export interface MenuCategory {
   categoryName: string;
+  /** Display order. Missing on categories saved before ordering was added. */
+  position?: number;
   items: MenuItem[];
 }
 

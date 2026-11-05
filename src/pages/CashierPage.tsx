@@ -229,7 +229,7 @@ export function CashierPage({ menu }: { menu: MenuCategory[] }) {
             </Alert>
           )}
           <Text size="sm">Please confirm that the order details are correct:</Text>
-          <OrderCard order={order} />
+          <OrderCard order={order} menu={menu} />
         </Stack>
       ),
       labels: { confirm: duplicate ? "Submit anyway" : "Confirm", cancel: "Cancel" },
