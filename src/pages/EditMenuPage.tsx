@@ -1,7 +1,8 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { doc, runTransaction } from "firebase/firestore";
 import {
   Alert,
+  Badge,
   Button,
   Card,
   Group,
@@ -10,23 +11,25 @@ import {
   Select,
   Stack,
   Table,
+  TagsInput,
   Text,
   TextInput,
   Title,
 } from "@mantine/core";
 import { modals } from "@mantine/modals";
+import { EmptyState } from "../components/StatusMessage";
 import { db } from "../firebase";
 import { menuCategoryFromDoc } from "../fromFirestore";
 import { MenuCategory, MenuItem, StockLevel } from "../types";
 import { notifyError, toCents } from "../utils";
 
 /**
- * Fields are kept as typed while editing and converted on save: the price in dollars
- * (a string while partially typed, e.g. "1."), flags as a comma-separated string
+ * The price is kept as typed while editing (in dollars, and a string while partially typed,
+ * e.g. "1.") and converted to cents on save
  */
 interface EditableMenuItem extends Omit<MenuItem, "flags" | "priceCents"> {
   price: number | string;
-  flagsString: string;
+  flags: string[];
 }
 
 interface EditableMenuCategory {
@@ -34,25 +37,33 @@ interface EditableMenuCategory {
   items: EditableMenuItem[];
 }
 
-const FLAG_LEGEND = [
-  ["NF", "Nut Free"],
-  ["DF", "Dairy Free"],
-  ["GF", "Gluten Free"],
-  ["VG", "Vegan"],
-  ["*", "Contains Pork (e.g. gelatin)"],
-];
+/** Standard flags, offered on every item. Others can be created per item and are then offered too. */
+const FLAG_MEANINGS: Record<string, string> = {
+  NF: "Nut Free",
+  DF: "Dairy Free",
+  GF: "Gluten Free",
+  VG: "Vegan",
+  "*": "Contains Pork (e.g. gelatin)",
+};
+const STANDARD_FLAGS = Object.keys(FLAG_MEANINGS);
+
+/** Reuses an existing flag's spelling when one matches ignoring case, so "nf" doesn't become a second NF */
+const normalizeFlags = (flags: string[], known: string[]) => {
+  const result: string[] = [];
+  for (const raw of flags) {
+    const flag = raw.trim();
+    if (!flag) continue;
+    const canonical = known.find((k) => k.toLowerCase() === flag.toLowerCase()) ?? flag;
+    if (!result.some((f) => f.toLowerCase() === canonical.toLowerCase())) result.push(canonical);
+  }
+  return result;
+};
 
 const STOCK_OPTIONS = [
   { value: "high", label: "High" },
   { value: "low", label: "Low" },
   { value: "none", label: "None" },
 ];
-
-const parseFlags = (flagsString: string) =>
-  flagsString
-    .split(",")
-    .map((s) => s.trim())
-    .filter(Boolean);
 
 const toEditable = (menu: MenuCategory[]): EditableMenuCategory[] =>
   menu.map((category) => ({
@@ -61,26 +72,57 @@ const toEditable = (menu: MenuCategory[]): EditableMenuCategory[] =>
       itemName,
       price: priceCents / 100,
       stock,
-      flagsString: (flags ?? []).join(", "),
+      flags: flags ?? [],
     })),
   }));
 
 const fromEditable = (items: EditableMenuItem[]): MenuItem[] =>
-  items.map(({ itemName, price, stock, flagsString }) => ({
+  items.map(({ itemName, price, stock, flags }) => ({
     // Stray whitespace would make e.g. "Latte " a separate item in orders and analytics
     itemName: itemName.trim(),
     priceCents: toCents(price),
     stock,
-    flags: parseFlags(flagsString),
+    flags,
   }));
+
+const NEW_ITEM: EditableMenuItem = { itemName: "New Item", price: 0, stock: "high", flags: [] };
+
+/** Firestore's ordering, which the live menu arrives in (orderBy("categoryName")) */
+const byCategoryName = (a: EditableMenuCategory, b: EditableMenuCategory) =>
+  a.categoryName < b.categoryName ? -1 : a.categoryName > b.categoryName ? 1 : 0;
+
+/** Categories are stored as Firestore documents named after them, so the name must be a valid ID */
+function categoryNameError(name: string, existing: EditableMenuCategory[]) {
+  if (!name) return "Enter a category name";
+  if (name.includes("/") || name === "." || name === ".." || /^__.*__$/.test(name))
+    return 'Category names can\'t contain "/"';
+  if (existing.some((category) => category.categoryName.toLowerCase() === name.toLowerCase()))
+    return `There's already a ${name} category`;
+  return null;
+}
 
 const sameMenu = (a: EditableMenuCategory[], b: EditableMenuCategory[]) => JSON.stringify(a) === JSON.stringify(b);
 
-export function EditMenuPage({ menu }: { menu: MenuCategory[] }) {
+/**
+ * @param active whether the Edit Menu tab is showing; the page stays mounted while hidden so
+ *   unsaved edits survive, and uses this to lock itself again once you leave
+ */
+export function EditMenuPage({ menu, active }: { menu: MenuCategory[]; active: boolean }) {
   // The menu the current edits started from, so live updates don't wipe edits in progress
   const [baseMenu, setBaseMenu] = useState(menu);
   const [editedMenu, setEditedMenu] = useState(() => toEditable(menu));
   const [saving, setSaving] = useState(false);
+  // Read-only until deliberately unlocked, so a stray tap can't change the live menu
+  const [locked, setLocked] = useState(true);
+  const [newCategoryName, setNewCategoryName] = useState("");
+  const [newCategoryError, setNewCategoryError] = useState<string | null>(null);
+
+  // Standard flags first, then any custom ones already used on the menu (including unsaved edits)
+  const customFlags = useMemo(() => {
+    const used = editedMenu.flatMap((category) => category.items.flatMap((item) => item.flags));
+    return [...new Set(used)].filter((flag) => !STANDARD_FLAGS.includes(flag)).sort();
+  }, [editedMenu]);
+  const flagOptions = useMemo(() => [...STANDARD_FLAGS, ...customFlags], [customFlags]);
 
   const hasUnsavedChanges = useMemo(() => !sameMenu(editedMenu, toEditable(baseMenu)), [editedMenu, baseMenu]);
 
@@ -89,6 +131,25 @@ export function EditMenuPage({ menu }: { menu: MenuCategory[] }) {
     setBaseMenu(menu);
     setEditedMenu(toEditable(menu));
   }
+
+  // Lock again on leaving the tab, unless that would strand unsaved edits
+  useEffect(() => {
+    if (!active && !hasUnsavedChanges) setLocked(true);
+  }, [active, hasUnsavedChanges]);
+
+  const confirmUnlock = () =>
+    modals.openConfirmModal({
+      title: "Unlock menu editing?",
+      children: (
+        <Text size="sm">
+          Saved changes go live on every station right away, including the cashier. The editor locks again after you
+          save or leave this tab.
+        </Text>
+      ),
+      labels: { confirm: "Unlock", cancel: "Cancel" },
+      confirmProps: { color: "orange" },
+      onConfirm: () => setLocked(false),
+    });
 
   const changedElsewhere = menu !== baseMenu && !saving && !sameMenu(toEditable(menu), toEditable(baseMenu));
 
@@ -109,8 +170,22 @@ export function EditMenuPage({ menu }: { menu: MenuCategory[] }) {
     value: EditableMenuItem[K],
   ) => updateItems(catIndex, (items) => items.map((item, j) => (j === itemIndex ? { ...item, [field]: value } : item)));
 
-  const handleAddItem = (catIndex: number) =>
-    updateItems(catIndex, (items) => [...items, { itemName: "New Item", price: 0, stock: "high", flagsString: "" }]);
+  const handleAddItem = (catIndex: number) => updateItems(catIndex, (items) => [...items, NEW_ITEM]);
+
+  /** Not saved yet: only exists in this device's edits */
+  const isUnsavedCategory = (categoryName: string) => !baseMenu.some((c) => c.categoryName === categoryName);
+
+  const handleAddCategory = () => {
+    const categoryName = newCategoryName.trim();
+    const error = categoryNameError(categoryName, editedMenu);
+    setNewCategoryError(error);
+    if (error) return;
+    // Start with one item to fill in; kept in Firestore's order so it lands where it'll be after saving
+    setEditedMenu((prev) => [...prev, { categoryName, items: [NEW_ITEM] }].sort(byCategoryName));
+    setNewCategoryName("");
+  };
+
+  const handleRemoveCategory = (catIndex: number) => setEditedMenu((prev) => prev.filter((_, i) => i !== catIndex));
 
   const handleRemoveItem = (catIndex: number, itemIndex: number) =>
     updateItems(catIndex, (items) => items.filter((_, j) => j !== itemIndex));
@@ -127,18 +202,30 @@ export function EditMenuPage({ menu }: { menu: MenuCategory[] }) {
         return;
       }
     }
-    const changed = savedMenu.filter((category, i) =>
-      !sameMenu(toEditable([category]), toEditable([baseMenu[i]])),
-    );
+    // Matched by name, since a new category shifts the positions of the ones after it
+    const changed = savedMenu.filter((category) => {
+      const base = baseMenu.find((c) => c.categoryName === category.categoryName);
+      return !base || !sameMenu(toEditable([category]), toEditable([base]));
+    });
     if (changed.length === 0) return;
     setSaving(true);
     try {
       await runTransaction(db, async (transaction) => {
-        const snapshots = await Promise.all(changed.map((category) => transaction.get(doc(db, "menu", category.categoryName))));
+        const snapshots = await Promise.all(
+          changed.map((category) => transaction.get(doc(db, "menu", category.categoryName))),
+        );
         for (let i = 0; i < changed.length; i++) {
           const snapshot = snapshots[i];
           const base = baseMenu.find((category) => category.categoryName === changed[i].categoryName);
-          if (!snapshot.exists() || !base || !sameMenu(toEditable([menuCategoryFromDoc(snapshot)]), toEditable([base]))) {
+          if (!base) {
+            if (snapshot.exists()) {
+              throw new Error(
+                `A ${changed[i].categoryName} category was added on another device. Discard your edits and try again.`,
+              );
+            }
+            continue;
+          }
+          if (!snapshot.exists() || !sameMenu(toEditable([menuCategoryFromDoc(snapshot)]), toEditable([base]))) {
             throw new Error(`${changed[i].categoryName} changed on another device. Discard your edits and try again.`);
           }
         }
@@ -146,6 +233,7 @@ export function EditMenuPage({ menu }: { menu: MenuCategory[] }) {
       });
       setBaseMenu(savedMenu);
       setEditedMenu(toEditable(savedMenu));
+      setLocked(true);
       modals.open({ title: "Menu Saved", children: <p>Menu successfully updated!</p> });
     } catch (error) {
       notifyError("Failed to save menu", error);
@@ -156,104 +244,218 @@ export function EditMenuPage({ menu }: { menu: MenuCategory[] }) {
 
   return (
     <Stack>
-      <fieldset disabled={saving} style={{ border: 0, padding: 0, margin: 0 }}>
       <Card shadow="sm" radius="md" p="md">
         <Group justify="space-between">
-          <Title order={2}>Edit Menu</Title>
-          <Button onClick={handleSaveMenu} loading={saving} color={hasUnsavedChanges ? "yellow" : "blue"}>
-            {hasUnsavedChanges ? "Save Changes *" : "Save Changes"}
-          </Button>
+          <Group gap="sm">
+            <Title order={2}>Edit Menu</Title>
+            {locked && (
+              <Badge color="gray" variant="light" size="lg">
+                Locked
+              </Badge>
+            )}
+          </Group>
+          {locked ? (
+            <Button variant="default" onClick={confirmUnlock}>
+              Unlock to edit
+            </Button>
+          ) : (
+            <Group gap="xs">
+              <Button
+                variant="default"
+                onClick={() => setLocked(true)}
+                // Locking would hide the edits behind a read-only view; save or discard them first
+                disabled={hasUnsavedChanges || saving}
+                title={hasUnsavedChanges ? "Save your changes first" : undefined}
+              >
+                Lock
+              </Button>
+              <Button onClick={handleSaveMenu} loading={saving} color={hasUnsavedChanges ? "yellow" : "blue"}>
+                {hasUnsavedChanges ? "Save Changes *" : "Save Changes"}
+              </Button>
+            </Group>
+          )}
         </Group>
       </Card>
 
-      {changedElsewhere && (
-        <Alert color="orange" title="The menu was changed on another device">
-          <Group justify="space-between">
-            <Text size="sm">If you edited the same category, saving will be rejected. Discard your edits to load the latest menu.</Text>
-            <Button size="xs" variant="outline" color="orange" onClick={discardEdits}>
-              Discard my edits and load latest
-            </Button>
-          </Group>
-        </Alert>
-      )}
+      {/* A flex column so the cards inside keep the Stack's spacing */}
+      <fieldset
+        disabled={saving || locked}
+        style={{
+          border: 0,
+          padding: 0,
+          margin: 0,
+          display: "flex",
+          flexDirection: "column",
+          gap: "var(--mantine-spacing-md)",
+        }}
+      >
+        {changedElsewhere && (
+          <Alert color="orange" title="The menu was changed on another device">
+            <Group justify="space-between">
+              <Text size="sm">If you edited the same category, saving will be rejected. Discard your edits to load the latest
+                menu.</Text>
+              <Button size="xs" variant="outline" color="orange" onClick={discardEdits}>
+                Discard my edits and load latest
+              </Button>
+            </Group>
+          </Alert>
+        )}
 
-      <Card shadow="sm" radius="md" p="md" withBorder>
-        <Title order={4} mb="xs">
-          Flag Legend
-        </Title>
-        <List spacing="xs" size="sm" withPadding>
-          {FLAG_LEGEND.map(([flag, meaning]) => (
-            <List.Item key={flag}>
+        <Card shadow="sm" radius="md" p="md" withBorder>
+          <Title order={4} mb="xs">
+            Flag Legend
+          </Title>
+          <List spacing="xs" size="sm" withPadding>
+            {Object.entries(FLAG_MEANINGS).map(([flag, meaning]) => (
+              <List.Item key={flag}>
+                <Text span fw={700}>
+                  {flag}
+                </Text>{" "}
+                – {meaning}
+              </List.Item>
+            ))}
+          </List>
+          {customFlags.length > 0 && (
+            <Text size="sm" mt="xs">
+              Other flags on this menu:{" "}
               <Text span fw={700}>
-                {flag}
-              </Text>{" "}
-              – {meaning}
-            </List.Item>
-          ))}
-        </List>
-      </Card>
+                {customFlags.join(", ")}
+              </Text>
+            </Text>
+          )}
+          <Text size="xs" c="dimmed" mt="xs">
+            To add a new flag, type it into an item&apos;s Flags box and press Enter. It&apos;s then offered for every
+            item.
+          </Text>
+        </Card>
 
-      {editedMenu.map((category, catIndex) => (
-        <Card key={category.categoryName} shadow="sm" radius="md" p="md">
-          <Group justify="space-between" mb="sm">
-            <Title order={4}>{category.categoryName}</Title>
-            <Button size="xs" onClick={() => handleAddItem(catIndex)}>
-              + Add Item
+        {editedMenu.length === 0 && (
+          <EmptyState title="The menu is empty">
+            Add a category below (e.g. Food, Drinks, Specialty) to start.
+          </EmptyState>
+        )}
+
+        {editedMenu.map((category, catIndex) => (
+          <Card key={category.categoryName} shadow="sm" radius="md" p="md">
+            <Group justify="space-between" mb="sm">
+              <Title order={4}>{category.categoryName}</Title>
+              <Group gap="xs">
+                {isUnsavedCategory(category.categoryName) && (
+                  <Button size="xs" variant="subtle" color="red" onClick={() => handleRemoveCategory(catIndex)}>
+                    Remove category
+                  </Button>
+                )}
+                <Button size="xs" onClick={() => handleAddItem(catIndex)}>
+                  + Add Item
+                </Button>
+              </Group>
+            </Group>
+            <Table.ScrollContainer minWidth={760}>
+              <Table>
+                <Table.Thead>
+                  <Table.Tr>
+                    <Table.Th>Name</Table.Th>
+                    <Table.Th>Price</Table.Th>
+                    <Table.Th>Stock</Table.Th>
+                    <Table.Th miw={220}>Flags</Table.Th>
+                    <Table.Th>Remove</Table.Th>
+                  </Table.Tr>
+                </Table.Thead>
+                <Table.Tbody>
+                  {category.items.map((item, itemIndex) => (
+                    <Table.Tr key={itemIndex}>
+                      <Table.Td>
+                        <TextInput
+                          value={item.itemName}
+                          onChange={(e) => handleItemChange(catIndex, itemIndex, "itemName", e.currentTarget.value)}
+                        />
+                      </Table.Td>
+                      <Table.Td>
+                        <NumberInput
+                          value={item.price}
+                          min={0}
+                          prefix="$"
+                          decimalScale={2}
+                          fixedDecimalScale
+                          onChange={(val) => handleItemChange(catIndex, itemIndex, "price", val)}
+                        />
+                      </Table.Td>
+                      <Table.Td>
+                        <Select
+                          value={item.stock}
+                          data={STOCK_OPTIONS}
+                          onChange={(val) =>
+                            handleItemChange(catIndex, itemIndex, "stock", (val ?? "none") as StockLevel)
+                          }
+                        />
+                      </Table.Td>
+                      <Table.Td>
+                        <TagsInput
+                          aria-label={`Flags for ${item.itemName}`}
+                          placeholder={item.flags.length === 0 ? "Pick or type a flag" : undefined}
+                          data={flagOptions}
+                          value={item.flags}
+                          onChange={(flags) =>
+                            handleItemChange(catIndex, itemIndex, "flags", normalizeFlags(flags, flagOptions))
+                          }
+                          renderOption={({ option }) =>
+                            FLAG_MEANINGS[option.value] ? (
+                              <Text size="sm">
+                                <Text span fw={700}>
+                                  {option.value}
+                                </Text>{" "}
+                                – {FLAG_MEANINGS[option.value]}
+                              </Text>
+                            ) : (
+                              <Text size="sm" fw={700}>
+                                {option.value}
+                              </Text>
+                            )
+                          }
+                          // Commas still separate flags when typing or pasting, e.g. "NF, GF"
+                          splitChars={[","]}
+                          acceptValueOnBlur
+                          clearable
+                        />
+                      </Table.Td>
+                      <Table.Td>
+                        <Button color="red" size="xs" onClick={() => handleRemoveItem(catIndex, itemIndex)}>
+                          Remove
+                        </Button>
+                      </Table.Td>
+                    </Table.Tr>
+                  ))}
+                </Table.Tbody>
+              </Table>
+            </Table.ScrollContainer>
+          </Card>
+        ))}
+
+        <Card shadow="sm" radius="md" p="md" withBorder>
+          <Group align="flex-start">
+            <TextInput
+              label="New category"
+              placeholder="e.g. Desserts"
+              value={newCategoryName}
+              error={newCategoryError}
+              onChange={(e) => {
+                setNewCategoryName(e.currentTarget.value);
+                setNewCategoryError(null);
+              }}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") handleAddCategory();
+              }}
+              style={{ flexGrow: 1 }}
+            />
+            <Button mt={25} onClick={handleAddCategory}>
+              + Add Category
             </Button>
           </Group>
-          <Table>
-            <Table.Thead>
-              <Table.Tr>
-                <Table.Th>Name</Table.Th>
-                <Table.Th>Price</Table.Th>
-                <Table.Th>Stock</Table.Th>
-                <Table.Th>Flags (e.g. NF, GF, VG)</Table.Th>
-                <Table.Th>Remove</Table.Th>
-              </Table.Tr>
-            </Table.Thead>
-            <Table.Tbody>
-              {category.items.map((item, itemIndex) => (
-                <Table.Tr key={itemIndex}>
-                  <Table.Td>
-                    <TextInput
-                      value={item.itemName}
-                      onChange={(e) => handleItemChange(catIndex, itemIndex, "itemName", e.currentTarget.value)}
-                    />
-                  </Table.Td>
-                  <Table.Td>
-                    <NumberInput
-                      value={item.price}
-                      min={0}
-                      prefix="$"
-                      decimalScale={2}
-                      fixedDecimalScale
-                      onChange={(val) => handleItemChange(catIndex, itemIndex, "price", val)}
-                    />
-                  </Table.Td>
-                  <Table.Td>
-                    <Select
-                      value={item.stock}
-                      data={STOCK_OPTIONS}
-                      onChange={(val) => handleItemChange(catIndex, itemIndex, "stock", (val ?? "none") as StockLevel)}
-                    />
-                  </Table.Td>
-                  <Table.Td>
-                    <TextInput
-                      value={item.flagsString}
-                      onChange={(e) => handleItemChange(catIndex, itemIndex, "flagsString", e.currentTarget.value)}
-                    />
-                  </Table.Td>
-                  <Table.Td>
-                    <Button color="red" size="xs" onClick={() => handleRemoveItem(catIndex, itemIndex)}>
-                      Remove
-                    </Button>
-                  </Table.Td>
-                </Table.Tr>
-              ))}
-            </Table.Tbody>
-          </Table>
+          <Text size="xs" c="dimmed" mt="xs">
+            New categories are saved with Save Changes. Items in a category named &quot;Specialty&quot; go to the
+            Specialty station instead of Food/Drink.
+          </Text>
         </Card>
-      ))}
       </fieldset>
     </Stack>
   );
