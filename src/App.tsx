@@ -57,7 +57,8 @@ function App() {
           <Tabs.Tab value="editMenu">Edit Menu</Tabs.Tab>
           <Tabs.Tab value="allOrders">All Orders</Tabs.Tab>
         </Tabs.List>
-        <Tabs.Panel value="cashier">
+        {/* Kept mounted so an order in progress survives a look at another tab */}
+        <Tabs.Panel value="cashier" keepMounted>
           <CashierPage menu={menu} />
         </Tabs.Panel>
         <Tabs.Panel value="kitchen">
