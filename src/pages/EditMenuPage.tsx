@@ -43,17 +43,15 @@ const FLAG_MEANINGS: Record<string, string> = {
 };
 const STANDARD_FLAGS = Object.keys(FLAG_MEANINGS);
 
+const sameFlag = (a: string) => (b: string) => a.toLowerCase() === b.toLowerCase();
+
 /** Reuse existing flag spelling for case-insensitive matches. */
-const normalizeFlags = (flags: string[], known: string[]) => {
-  const result: string[] = [];
-  for (const raw of flags) {
-    const flag = raw.trim();
-    if (!flag) continue;
-    const canonical = known.find((k) => k.toLowerCase() === flag.toLowerCase()) ?? flag;
-    if (!result.some((f) => f.toLowerCase() === canonical.toLowerCase())) result.push(canonical);
-  }
-  return result;
-};
+const normalizeFlags = (flags: string[], known: string[]) =>
+  flags
+    .map((flag) => flag.trim())
+    .filter((flag) => flag !== "")
+    .map((flag) => known.find(sameFlag(flag)) ?? flag)
+    .filter((flag, i, all) => all.findIndex(sameFlag(flag)) === i);
 
 const STOCK_OPTIONS = [
   { value: "high", label: "High" },
@@ -97,6 +95,31 @@ function categoryNameError(name: string, existing: EditableMenuCategory[]) {
 }
 
 const sameMenu = (a: EditableMenuCategory[], b: EditableMenuCategory[]) => JSON.stringify(a) === JSON.stringify(b);
+
+const sameCategory = (a: MenuCategory, b: MenuCategory) => sameMenu(toEditable([a]), toEditable([b]));
+
+const toSavedMenu = (menu: EditableMenuCategory[]): MenuCategory[] =>
+  menu.map((category) => ({ categoryName: category.categoryName, items: fromEditable(category.items) }));
+
+function menuError(menu: MenuCategory[]) {
+  const invalid = menu.find((category) => {
+    const names = category.items.map((item) => item.itemName);
+    return names.some((name) => !name) || new Set(names).size !== names.length;
+  });
+  return invalid ? `Item names in ${invalid.categoryName} must be nonempty and unique.` : null;
+}
+
+/** Match by name because adding a category changes array positions. */
+const changedCategories = (menu: MenuCategory[], base: MenuCategory[]) =>
+  menu.filter((category) => {
+    const original = base.find((c) => c.categoryName === category.categoryName);
+    return !original || !sameCategory(category, original);
+  });
+
+function conflictError(categoryName: string, base: MenuCategory | undefined, current: MenuCategory | undefined) {
+  if (!base) return current ? `A ${categoryName} category was added on another device.` : null;
+  return current && sameCategory(current, base) ? null : `${categoryName} changed on another device.`;
+}
 
 /** The mounted editor uses `active` to lock when the tab is left. */
 export function EditMenuPage({ menu, active }: { menu: MenuCategory[]; active: boolean }) {
@@ -178,45 +201,30 @@ export function EditMenuPage({ menu, active }: { menu: MenuCategory[]; active: b
     updateItems(catIndex, (items) => items.filter((_, j) => j !== itemIndex));
 
   const handleSaveMenu = async () => {
-    const savedMenu: MenuCategory[] = editedMenu.map((category) => ({
-      categoryName: category.categoryName,
-      items: fromEditable(category.items),
-    }));
-    for (const category of savedMenu) {
-      const names = category.items.map((item) => item.itemName);
-      if (names.some((name) => !name) || new Set(names).size !== names.length) {
-        notifyError("Invalid menu", `Item names in ${category.categoryName} must be nonempty and unique.`);
-        return;
-      }
+    const savedMenu = toSavedMenu(editedMenu);
+    const invalid = menuError(savedMenu);
+    if (invalid) {
+      notifyError("Invalid menu", invalid);
+      return;
     }
-    // Match by name because adding a category changes array positions.
-    const changed = savedMenu.filter((category) => {
-      const base = baseMenu.find((c) => c.categoryName === category.categoryName);
-      return !base || !sameMenu(toEditable([category]), toEditable([base]));
-    });
+    const changed = changedCategories(savedMenu, baseMenu);
     if (changed.length === 0) return;
     setSaving(true);
     try {
       await runTransaction(db, async (transaction) => {
-        const snapshots = await Promise.all(
-          changed.map((category) => transaction.get(doc(db, "menu", category.categoryName))),
-        );
-        for (let i = 0; i < changed.length; i++) {
-          const snapshot = snapshots[i];
-          const base = baseMenu.find((category) => category.categoryName === changed[i].categoryName);
-          if (!base) {
-            if (snapshot.exists()) {
-              throw new Error(
-                `A ${changed[i].categoryName} category was added on another device. Discard your edits and try again.`,
-              );
-            }
-            continue;
-          }
-          if (!snapshot.exists() || !sameMenu(toEditable([menuCategoryFromDoc(snapshot)]), toEditable([base]))) {
-            throw new Error(`${changed[i].categoryName} changed on another device. Discard your edits and try again.`);
-          }
-        }
-        for (const category of changed) transaction.set(doc(db, "menu", category.categoryName), category);
+        const refs = changed.map((category) => doc(db, "menu", category.categoryName));
+        const snapshots = await Promise.all(refs.map((ref) => transaction.get(ref)));
+        const conflict = changed
+          .map(({ categoryName }, i) =>
+            conflictError(
+              categoryName,
+              baseMenu.find((category) => category.categoryName === categoryName),
+              snapshots[i].exists() ? menuCategoryFromDoc(snapshots[i]) : undefined,
+            ),
+          )
+          .find((error) => error !== null);
+        if (conflict) throw new Error(`${conflict} Discard your edits and try again.`);
+        changed.forEach((category, i) => transaction.set(refs[i], category));
       });
       setBaseMenu(savedMenu);
       setEditedMenu(toEditable(savedMenu));

@@ -58,23 +58,29 @@ const roundedQuantity = (value: number | string) => {
   return Number.isFinite(quantity) ? Math.max(0, Math.ceil(quantity)) : 0;
 };
 
-/** Write the order and specialty entry atomically under the same ID. */
-async function saveOrder(order: Order) {
+function toOrderDocuments(order: Order) {
   const specialty = order.categories[SPECIALTY_CATEGORY];
-  const batch = writeBatch(db);
-  const orderRef = doc(collection(db, "orders"));
   const specialtyOnly = isSpecialtyOnly(order.categories);
-  batch.set(orderRef, { ...order, timestamp: serverTimestamp(), specialtyOnly });
-  if (specialty !== undefined) {
-    batch.set(doc(db, "specialty", orderRef.id), {
+  return {
+    orderDoc: { ...order, timestamp: serverTimestamp(), specialtyOnly },
+    specialtyDoc: specialty && {
       number: order.number,
       notes: order.notes,
       done: false,
       specialtyOnly,
       timestamp: serverTimestamp(),
       items: specialty.items,
-    });
-  }
+    },
+  };
+}
+
+/** Write the order and specialty entry atomically under the same ID. */
+async function saveOrder(order: Order) {
+  const { orderDoc, specialtyDoc } = toOrderDocuments(order);
+  const batch = writeBatch(db);
+  const orderRef = doc(collection(db, "orders"));
+  batch.set(orderRef, orderDoc);
+  if (specialtyDoc) batch.set(doc(db, "specialty", orderRef.id), specialtyDoc);
   await batch.commit();
 }
 
@@ -96,18 +102,18 @@ const calculateTotalCents = (menu: MenuCategory[], quantities: Quantities) =>
     0,
   );
 
-function toOrderCategories(menu: MenuCategory[], quantities: Quantities): Order["categories"] {
-  const categories: Order["categories"] = {};
-  for (const menuCategory of menu) {
-    const category: OrderCategory = { done: false, items: {} };
-    for (const item of menuCategory.items) {
-      const quantity = quantityOf(quantities, menuCategory, item);
-      if (quantity > 0) category.items[item.itemName] = { quantity };
-    }
-    if (Object.keys(category.items).length > 0) categories[menuCategory.categoryName] = category;
-  }
-  return categories;
-}
+const toOrderCategories = (menu: MenuCategory[], quantities: Quantities): Order["categories"] =>
+  Object.fromEntries(
+    menu.flatMap((menuCategory): [string, OrderCategory][] => {
+      const items = Object.fromEntries(
+        menuCategory.items
+          .map((item) => [item.itemName, quantityOf(quantities, menuCategory, item)] as const)
+          .filter(([, quantity]) => quantity > 0)
+          .map(([itemName, quantity]) => [itemName, { quantity }]),
+      );
+      return Object.keys(items).length > 0 ? [[menuCategory.categoryName, { done: false, items }]] : [];
+    }),
+  );
 
 const itemsError = (menu: MenuCategory[], quantities: Quantities) => {
   if (missingItems(menu, quantities).length > 0) return "Remove unavailable items before submitting.";

@@ -9,6 +9,27 @@ import { useFlashIds } from "../hooks/useFlashIds";
 import { Specialty } from "../types";
 import { isSpecialtyOnly, notifyError, notifySnapshotError, SPECIALTY_CATEGORY } from "../utils";
 
+// Specialty-only orders bypass the server station and must be completed here.
+const orderUpdate = (done: boolean, specialtyOnly: boolean) => ({
+  [`categories.${SPECIALTY_CATEGORY}.done`]: done,
+  ...(specialtyOnly && { completed: done }),
+});
+
+// Older specialty documents do not have this field.
+async function resolveSpecialtyOnly({ id, specialtyOnly }: Specialty) {
+  if (specialtyOnly !== undefined) return specialtyOnly;
+  const order = await getDoc(doc(db, "orders", id));
+  return order.exists() && isSpecialtyOnly(order.data().categories ?? {});
+}
+
+async function setDone(specialty: Specialty, done: boolean) {
+  const specialtyOnly = await resolveSpecialtyOnly(specialty);
+  const batch = writeBatch(db);
+  batch.update(doc(db, "specialty", specialty.id), { done });
+  batch.update(doc(db, "orders", specialty.id), orderUpdate(done, specialtyOnly));
+  return batch.commit();
+}
+
 export function SpecialtyPage() {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [specialties, setSpecialties] = useState<Specialty[] | null>(null);
@@ -29,22 +50,6 @@ export function SpecialtyPage() {
   const { flashIds: newIds, dismiss } = useFlashIds(specialties?.map((specialty) => specialty.id) ?? null, {
     durationMs: 10_000,
   });
-
-  // Specialty-only orders bypass the server station and must be completed here.
-  const setDone = async ({ id, specialtyOnly }: Specialty, done: boolean) => {
-    // Older specialty documents do not have this field.
-    if (specialtyOnly === undefined) {
-      const order = await getDoc(doc(db, "orders", id));
-      specialtyOnly = order.exists() && isSpecialtyOnly(order.data().categories ?? {});
-    }
-    const batch = writeBatch(db);
-    batch.update(doc(db, "specialty", id), { done });
-    batch.update(doc(db, "orders", id), {
-      [`categories.${SPECIALTY_CATEGORY}.done`]: done,
-      ...(specialtyOnly && { completed: done }),
-    });
-    return batch.commit();
-  };
 
   const completeSpecialtyOrder = async (specialty: Specialty) => {
     try {

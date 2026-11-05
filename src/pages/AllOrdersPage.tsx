@@ -18,20 +18,15 @@ const itemsToString = (items: OrderItems | undefined) =>
         .join(", ");
 
 function computeAnalytics(orders: Order[], menu: MenuCategory[]) {
-  const soldByItem = new Map<string, number>(
-    menu.flatMap((category) => category.items.map((item) => [item.itemName, 0] as const)),
+  const lineItems = orders.flatMap((order) =>
+    Object.values(order.categories).flatMap((category) => Object.entries(category.items)),
   );
-  let totalItems = 0;
-  let totalRevenueCents = 0;
-  for (const order of orders) {
-    totalRevenueCents += order.totalCents;
-    for (const category of Object.values(order.categories)) {
-      for (const [itemName, { quantity }] of Object.entries(category.items)) {
-        totalItems += quantity;
-        soldByItem.set(itemName, (soldByItem.get(itemName) ?? 0) + quantity);
-      }
-    }
-  }
+  const soldByItem = lineItems.reduce(
+    (sold, [itemName, { quantity }]) => sold.set(itemName, (sold.get(itemName) ?? 0) + quantity),
+    new Map<string, number>(menu.flatMap((category) => category.items.map((item) => [item.itemName, 0] as const))),
+  );
+  const totalItems = lineItems.reduce((sum, [, { quantity }]) => sum + quantity, 0);
+  const totalRevenueCents = orders.reduce((sum, order) => sum + order.totalCents, 0);
   return {
     totals: [
       ["Orders", orders.length.toLocaleString("en-US")],
