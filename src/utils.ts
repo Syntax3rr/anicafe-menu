@@ -9,6 +9,12 @@ export const isSpecialtyOnly = (categories: Record<string, unknown>) => {
   return names.length === 1 && names[0] === SPECIALTY_CATEGORY;
 };
 
+/** Every category the station sees (all but `excludeCategories`) is done, so the order can go out */
+export const isOrderReady = (order: { categories: Record<string, { done: boolean }> }, excludeCategories: string[]) => {
+  const tracked = Object.entries(order.categories).filter(([name]) => !excludeCategories.includes(name));
+  return tracked.length > 0 && tracked.every(([, category]) => category.done);
+};
+
 export const ZONES = ["Bar", "Cashier", "Stage", "Undecided", "Volunteer"] as const;
 
 const ZONE_COLORS: Record<string, string> = {

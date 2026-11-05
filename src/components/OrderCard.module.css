@@ -1,24 +1,29 @@
-/* Glow that pulses around a newly arrived order */
-.new {
-  animation: newOrderPulse 1.2s ease-in-out infinite;
+/* Glow that pulses around a card that needs attention: blue for a new order, green for ready */
+.flash {
+  --flash-color: var(--mantine-color-blue-filled);
+  animation: flashPulse 1.2s ease-in-out infinite;
 }
 
-@keyframes newOrderPulse {
+.flash[data-flash="ready"] {
+  --flash-color: var(--mantine-color-green-filled);
+}
+
+@keyframes flashPulse {
   0%,
   100% {
-    box-shadow: 0 0 0 2px var(--mantine-color-blue-filled);
+    box-shadow: 0 0 0 2px var(--flash-color);
   }
   50% {
     box-shadow:
-      0 0 0 4px var(--mantine-color-blue-filled),
-      0 0 24px 6px var(--mantine-color-blue-filled);
+      0 0 0 4px var(--flash-color),
+      0 0 24px 6px var(--flash-color);
   }
 }
 
 /* Steady highlight instead of pulsing for people who turn off animations */
 @media (prefers-reduced-motion: reduce) {
-  .new {
+  .flash {
     animation: none;
-    box-shadow: 0 0 0 4px var(--mantine-color-blue-filled);
+    box-shadow: 0 0 0 4px var(--flash-color);
   }
 }

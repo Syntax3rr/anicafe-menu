@@ -2,7 +2,7 @@ import { Fragment } from "react";
 import { Badge, Button, Card, Checkbox, Group, Table, Text, Title } from "@mantine/core";
 import { useNow } from "../hooks/useNow";
 import { Order } from "../types";
-import { byKey, zoneToColor } from "../utils";
+import { byKey, isOrderReady, zoneToColor } from "../utils";
 import classes from "./OrderCard.module.css";
 
 /** Orders waiting longer than this get their age highlighted */
@@ -31,16 +31,25 @@ interface OrderCardProps {
   completeOrder?: () => Promise<void>;
   /** "view" shows read-only checkboxes; a function makes them editable; omitted hides them */
   completeCategory?: "view" | ((orderId: string, categoryName: string, value: boolean) => Promise<void>);
-  /** Just arrived: the card pulses to catch the station's eye */
-  isNew?: boolean;
+  /** Pulses to catch the station's eye: blue with a "New" badge, or green for just became ready */
+  flash?: "new" | "ready";
+  /** Called when someone taps, clicks or tabs into the card, e.g. to stop it flashing */
+  onInteract?: () => void;
 }
 
-export function OrderCard({ order, excludeCategories = [], completeOrder, completeCategory, isNew }: OrderCardProps) {
+export function OrderCard({
+  order,
+  excludeCategories = [],
+  completeOrder,
+  completeCategory,
+  flash,
+  onInteract,
+}: OrderCardProps) {
   const categories = Object.entries(order.categories)
     .filter(([categoryName]) => !excludeCategories.includes(categoryName))
     .sort(byKey);
   // Every category this station tracks is done, so the order is ready to go out
-  const ready = completeCategory !== undefined && categories.length > 0 && categories.every(([, c]) => c.done);
+  const ready = completeCategory !== undefined && isOrderReady(order, excludeCategories);
   // Null until the server confirms the write
   const placedAtMs = order.timestamp?.toMillis();
 
@@ -50,7 +59,12 @@ export function OrderCard({ order, excludeCategories = [], completeOrder, comple
       radius="md"
       p="md"
       withBorder
-      className={isNew ? classes.new : undefined}
+      className={flash ? classes.flash : undefined}
+      data-flash={flash}
+      // Capture phase, so ticking a checkbox or pressing a button inside counts too. Click rather
+      // than pointerdown, so swiping across the card to scroll on an iPad doesn't count.
+      onClickCapture={onInteract}
+      onFocusCapture={onInteract}
       style={{
         height: "420px",
         display: "flex",
@@ -64,7 +78,7 @@ export function OrderCard({ order, excludeCategories = [], completeOrder, comple
           <Group gap="xs">
             <Title order={3}>Order #{order.number}</Title>
             {order.zone && <Badge color={zoneToColor(order.zone)}>{order.zone}</Badge>}
-            {isNew && <Badge color="blue">New</Badge>}
+            {flash === "new" && <Badge color="blue">New</Badge>}
             {ready && (
               <Badge color="green" variant="light">
                 Ready

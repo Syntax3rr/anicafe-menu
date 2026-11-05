@@ -5,7 +5,7 @@ import { OrderGrid } from "../components/OrderGrid";
 import { EmptyState, ErrorState, LoadingState } from "../components/StatusMessage";
 import { showUndoNotification } from "../components/undoNotification";
 import { db } from "../firebase";
-import { useNewIds } from "../hooks/useNewIds";
+import { useFlashIds } from "../hooks/useFlashIds";
 import { Specialty } from "../types";
 import { isSpecialtyOnly, notifyError, notifySnapshotError, SPECIALTY_CATEGORY } from "../utils";
 
@@ -19,12 +19,17 @@ export function SpecialtyPage() {
       onSnapshot(
         query(collection(db, "specialty"), where("done", "==", false), orderBy("timestamp")),
         (snapshot) => setSpecialties(snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }) as Specialty)),
-        (error) => { setLoadError(error.message); notifySnapshotError("specialty orders")(error); },
+        (error) => {
+          setLoadError(error.message);
+          notifySnapshotError("specialty orders")(error);
+        },
       ),
     [],
   );
 
-  const newIds = useNewIds(specialties?.map((specialty) => specialty.id) ?? null);
+  const { flashIds: newIds, dismiss } = useFlashIds(specialties?.map((specialty) => specialty.id) ?? null, {
+    durationMs: 10_000,
+  });
 
   // A specialty doc shares its ID with its parent order, so keep both in sync. Specialty-only
   // orders never reach the Servers tab, so finishing the specialty finishes the whole order.
@@ -64,7 +69,8 @@ export function SpecialtyPage() {
       {specialties.map((specialty) => (
         <OrderCard
           key={specialty.id}
-          isNew={newIds.has(specialty.id)}
+          flash={newIds.has(specialty.id) ? "new" : undefined}
+          onInteract={() => dismiss(specialty.id)}
           order={{
             id: specialty.id,
             number: specialty.number,
