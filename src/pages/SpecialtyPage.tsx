@@ -1,11 +1,11 @@
 import { useEffect, useState } from "react";
-import { collection, doc, onSnapshot, orderBy, query, where, writeBatch } from "firebase/firestore";
+import { collection, doc, getDoc, onSnapshot, orderBy, query, where, writeBatch } from "firebase/firestore";
 import { OrderCard } from "../components/OrderCard";
 import { OrderGrid } from "../components/OrderGrid";
 import { showUndoNotification } from "../components/undoNotification";
 import { db } from "../firebase";
 import { Specialty } from "../types";
-import { notifyError, notifySnapshotError, SPECIALTY_CATEGORY } from "../utils";
+import { isSpecialtyOnly, notifyError, notifySnapshotError, SPECIALTY_CATEGORY } from "../utils";
 
 /** Specialty station: handles the Specialty category separately from the kitchen */
 export function SpecialtyPage() {
@@ -24,7 +24,12 @@ export function SpecialtyPage() {
 
   // A specialty doc shares its ID with its parent order, so keep both in sync. Specialty-only
   // orders never reach the Servers tab, so finishing the specialty finishes the whole order.
-  const setDone = ({ id, specialtyOnly }: Specialty, done: boolean) => {
+  const setDone = async ({ id, specialtyOnly }: Specialty, done: boolean) => {
+    // Specialty docs created before the field existed don't say, so check the order itself
+    if (specialtyOnly === undefined) {
+      const order = await getDoc(doc(db, "orders", id));
+      specialtyOnly = order.exists() && isSpecialtyOnly(order.data().categories ?? {});
+    }
     const batch = writeBatch(db);
     batch.update(doc(db, "specialty", id), { done });
     batch.update(doc(db, "orders", id), {

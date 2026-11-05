@@ -19,11 +19,20 @@ import {
 } from "@mantine/core";
 import { useForm } from "@mantine/form";
 import { modals } from "@mantine/modals";
+import { notifications } from "@mantine/notifications";
 import { OrderCard } from "../components/OrderCard";
 import { db } from "../firebase";
 import { orderFromDoc } from "../fromFirestore";
 import { MenuCategory, MenuItem, Order, OrderCategory } from "../types";
-import { formatCents, notifyError, notifySnapshotError, SPECIALTY_CATEGORY, toCents, toFormKey, ZONES } from "../utils";
+import {
+  formatCents,
+  isSpecialtyOnly,
+  notifySnapshotError,
+  SPECIALTY_CATEGORY,
+  toCents,
+  toFormKey,
+  ZONES,
+} from "../utils";
 import classes from "../App.module.css";
 
 const MENU_COLUMNS = 2;
@@ -36,7 +45,7 @@ async function saveOrder(order: Order) {
   const specialty = order.categories[SPECIALTY_CATEGORY];
   const batch = writeBatch(db);
   const orderRef = doc(collection(db, "orders"));
-  const specialtyOnly = specialty !== undefined && Object.keys(order.categories).length === 1;
+  const specialtyOnly = isSpecialtyOnly(order.categories);
   batch.set(orderRef, { ...order, timestamp: serverTimestamp(), specialtyOnly });
   if (specialty !== undefined) {
     batch.set(doc(db, "specialty", orderRef.id), {
@@ -87,6 +96,28 @@ function toOrderCategories(menu: MenuCategory[], quantities: Quantities): Order[
   return categories;
 }
 
+const itemsError = (menu: MenuCategory[], quantities: Quantities) => {
+  // An item can sell out while it's already in the order, and the input still accepts typing
+  const soldOut = menu.flatMap((category) =>
+    category.items.filter((item) => item.stock === "none" && quantityOf(quantities, category, item) > 0),
+  );
+  if (soldOut.length > 0) return `Sold out, remove from order: ${soldOut.map((item) => item.itemName).join(", ")}`;
+  return Object.keys(toOrderCategories(menu, quantities)).length > 0 ? null : "Select at least one item";
+};
+
+const discountError = (menu: MenuCategory[], values: { items: Quantities; discount: number | string }) =>
+  calculateTotalCents(menu, values.items) >= toCents(values.discount) ? null : "Discount greater than order total";
+
+/**
+ * Legacy specialty-only orders (from before `specialtyOnly` was stored) were never marked
+ * completed, so treat them as closed once their specialty items are done
+ */
+const isEffectivelyOpen = (order: Order) =>
+  !(order.specialtyOnly === undefined && isSpecialtyOnly(order.categories) && order.categories[SPECIALTY_CATEGORY].done);
+
+/** Shown after the order is handed to Firestore, until the server confirms it */
+const SLOW_SAVE_MS = 4000;
+
 const DEFAULT_VALUES = {
   number: null as number | null,
   notes: "",
@@ -94,6 +125,52 @@ const DEFAULT_VALUES = {
   discount: 0 as number | string,
   zone: "Undecided",
 };
+
+/**
+ * Saves the order, showing its progress in a notification. Firestore queues the write and
+ * retries until the server confirms it (the promise doesn't reject on a bad connection), so a
+ * slow save must not be re-entered: it would arrive twice. It's held in memory only, though,
+ * so the tab must stay open until it's sent.
+ */
+async function sendOrder(order: Order, restore: () => void) {
+  const title = `Order #${order.number}`;
+  const id = notifications.show({ loading: true, title: `Sending ${title}...`, message: "", autoClose: false, withCloseButton: false });
+  const slowTimer = setTimeout(
+    () =>
+      notifications.update({
+        id,
+        color: "orange",
+        title: `Still sending ${title}...`,
+        message: "The connection is slow. Keep this tab open, and don't re-enter the order: it will go through once the connection recovers.",
+      }),
+    SLOW_SAVE_MS,
+  );
+  try {
+    await saveOrder(order);
+    notifications.update({ id, loading: false, color: "green", title: `${title} sent`, message: "", autoClose: 3000, withCloseButton: true });
+  } catch (error) {
+    // Rejected by the server (e.g. permissions), so nothing was saved
+    console.error(`${title} was NOT saved`, error);
+    notifications.update({
+      id,
+      loading: false,
+      color: "red",
+      title: `${title} was NOT saved`,
+      message: (
+        <Stack gap="xs" align="flex-start">
+          <Text size="sm">{error instanceof Error ? error.message : "An unexpected error occurred."}</Text>
+          <Button size="xs" color="red" variant="outline" onClick={() => { restore(); notifications.hide(id); }}>
+            Put it back in the form (replaces what's there)
+          </Button>
+        </Stack>
+      ),
+      autoClose: false,
+      withCloseButton: true,
+    });
+  } finally {
+    clearTimeout(slowTimer);
+  }
+}
 
 export function CashierPage({ menu }: { menu: MenuCategory[] }) {
   // Keyed by form path so the menu can change shape without breaking the lookups
@@ -104,8 +181,8 @@ export function CashierPage({ menu }: { menu: MenuCategory[] }) {
     initialValues: { ...DEFAULT_VALUES, items: emptyQuantities(menu) },
     validate: {
       number: (value: number | null) => (value && value > 0 ? null : "Order number is required"),
-      discount: (value: number | string, values: { items: Quantities }) => (calculateTotalCents(menu, values.items) >= toCents(value) ? null : "Discount greater than order total"),
-      items: (value: Quantities) => Object.keys(toOrderCategories(menu, value)).length ? null : "Select at least one item",
+      discount: (_: number | string, values: { items: Quantities; discount: number | string }) => discountError(menu, values),
+      items: (value: Quantities) => itemsError(menu, value),
     },
   });
 
@@ -127,15 +204,25 @@ export function CashierPage({ menu }: { menu: MenuCategory[] }) {
 
   const totalCents = calculateTotalCents(menu, form.values.items) - toCents(form.values.discount);
 
+  // Quantities are edited at items.<category>.<item>, and Mantine only clears the error at that
+  // exact path, so drop the order-level errors once a quantity (or menu) change resolves them
+  const { items, discount } = form.values;
+  useEffect(() => {
+    if (form.errors.items && !itemsError(menu, items)) form.clearFieldError("items");
+    if (form.errors.discount && !discountError(menu, { items, discount })) form.clearFieldError("discount");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [menu, items]);
+
   // Order numbers are recycled, so only a still-open order with the same number is a duplicate.
-  // Kept live (rather than queried on submit) so the check is instant and works offline.
+  // Kept live (rather than queried on submit) so the check is instant, and this device's own
+  // unconfirmed orders show up in it straight away.
   const [openOrders, setOpenOrders] = useState<Order[] | null>(null);
   const [ordersError, setOrdersError] = useState<string | null>(null);
   useEffect(
     () =>
       onSnapshot(
         query(collection(db, "orders"), where("completed", "==", false)),
-        (snapshot) => { setOpenOrders(snapshot.docs.map(orderFromDoc)); setOrdersError(null); },
+        (snapshot) => { setOpenOrders(snapshot.docs.map(orderFromDoc).filter(isEffectivelyOpen)); setOrdersError(null); },
         (error) => { setOrdersError(error.message); notifySnapshotError("open orders")(error); },
       ),
     [],
@@ -175,14 +262,11 @@ export function CashierPage({ menu }: { menu: MenuCategory[] }) {
       ),
       labels: { confirm: duplicate ? "Submit anyway" : "Confirm", cancel: "Cancel" },
       confirmProps: duplicate && { color: "orange" },
-      onConfirm: async () => {
-        try {
-          await saveOrder(order);
-          form.reset();
-        } catch (error) {
-          // Keep the form filled in so the cashier can retry
-          notifyError(`Order #${order.number} was NOT saved`, error);
-        }
+      onConfirm: () => {
+        // Clear the form right away so the next order can be taken; the save is tracked in a
+        // notification instead (see sendOrder)
+        form.reset();
+        void sendOrder(order, () => form.setValues(values));
       },
     });
   };
@@ -250,7 +334,8 @@ export function CashierPage({ menu }: { menu: MenuCategory[] }) {
                           hideControls
                           handlersRef={(el) => (handlersRef.current[formPath] = el)}
                           min={0}
-                          max={99}
+                          // Sold-out items can be reduced but not increased
+                          max={soldOut ? quantityOf(form.getValues().items, category, item) : 99}
                           key={form.key(formPath)}
                           {...form.getInputProps(formPath)}
                         />
