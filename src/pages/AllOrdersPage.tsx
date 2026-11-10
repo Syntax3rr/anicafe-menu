@@ -109,6 +109,36 @@ const itemsToString = (items: OrderItems | undefined, menuOrder: string[]) =>
         .map(([itemName, { quantity }]) => `${quantity} ${itemName}`)
         .join(", ");
 
+/** Quote every cell and prevent spreadsheet programs from evaluating text as a formula. */
+const csvCell = (value: string | number) => {
+  const text = String(value);
+  const safe = typeof value === "string" && /^\s*[=+\-@]/.test(text) ? `'${text}` : text;
+  return `"${safe.replace(/"/g, '""')}"`;
+};
+
+function exportOrders(orders: Order[], categories: string[]) {
+  const rows: (string | number)[][] = [
+    ["Order #", "Time (UTC)", "Price", "Discount", "Status", "Zone", "Notes", ...categories],
+    ...orders.map((order) => [
+      order.number,
+      order.timestamp?.toDate().toISOString() ?? "",
+      order.totalCents / 100,
+      order.discountCents / 100,
+      order.completed ? "Completed" : "Open",
+      order.zone ?? "",
+      order.notes,
+      ...categories.map((category) => itemsToString(order.categories[category]?.items)),
+    ]),
+  ];
+  const csv = "\uFEFF" + rows.map((row) => row.map(csvCell).join(",")).join("\r\n");
+  const url = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" }));
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = `orders-${toDateKey(new Date())}.csv`;
+  link.click();
+  URL.revokeObjectURL(url);
+}
+
 /** Revenue ignores the category filter because discounts apply to whole orders. */
 function computeAnalytics(orders: Order[], menu: MenuCategory[], categories: string[]) {
   const shown = (categoryName: string) => categories.length === 0 || categories.includes(categoryName);
@@ -306,7 +336,12 @@ export function AllOrdersPage({ menu }: { menu: MenuCategory[] }) {
           </Table.Tbody>
         </Table>
       </Table.ScrollContainer>
-      <Title order={2}>All Orders</Title>
+      <Group justify="space-between">
+        <Title order={2}>All Orders</Title>
+        <Button variant="default" disabled={filteredOrders.length === 0} onClick={() => exportOrders(filteredOrders, analytics.categories)}>
+          Export shown orders to CSV
+        </Button>
+      </Group>
       {orders.length === 0 ? (
         <EmptyState title="No orders yet" />
       ) : filteredOrders.length === 0 ? (
